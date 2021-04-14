@@ -1,817 +1,1951 @@
-# Zkopru protocol specification - v2.0.0-alpha.0
+# Zkopru Protocol Specification
 
+## 1. Account & Elliptic Curve Cryptography
+
+Zkopru uses Baby Jubjub curve for its Elliptic Curve Cryptography. The arithmeric is defined in the reference [paper](https://iden3-docs.readthedocs.io/en/latest/_downloads/33717d75ab84e11313cc0d8a090b636f/Baby-Jubjub.pdf) written by Barry Whitehat and Jordi Baylina.
+
+#### [1.1] - Scalar field of BabyJubjub curve
+
+
+Let
+$$
+p = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+$$
+and, $\mathbb{F}_p$ be the finite field which modular is $p$.
+
+#### [1.2] - Group definition for the Babyjubjub curve points
+
+Let $p$ and $\mathbb{F}_p$ be defined in [1.1].
+
+The Montgomerry form of the Baby Jubjub curve 
+$$
+E_M: v^2 = u^3 + 168698u^2 + u
+$$
+The order of $E_M$ is
+$$
+n = 21888242871839275222246405745257275088614511777268538073601725287587578984328 \\
+= 8 \times r
+$$
+where $r = 2736030358979909402780800718157159386076813972158567259200215660948447373041$ is a prime number.
+
+Let $\mathbb{F}_r$ be the finite field which modular is $r$.
+
+Denote $\mathbb{G}$ the subgroup of points of order $r$, that is
+$$
+\mathbb{G} = \{\mathbf{P} \in E(\mathbb{F}_p) | r\mathbf{P} = \mathbf{O}\}
+$$
+ where $\mathbf{O}$ is the infinite zero.
+
+#### [1.3] - 
+
+Let $p$ and $\mathbb{F}_p$ be defined in [1.1].
+Let $E_M$, $n$ be defined in [1.2].
+
+The Edward form of the curve $E$ that is birationally equivalent to $E_M$ defined over $\mathbb{F}_p$
+$$
+E: x^2 + y^2 = 1 + dx^2y^2
+$$
+where
+$d = 9706598848417545097372247223557719406784115219466060233080913168975159366771$.
+
+If $(u, v)$ is a Baby Jubjub point in the Montgomerry form, its equivalent Edward form
+$$
+(x,y) = \left( \frac{1 + y}{1 - y}, \frac{1 + y}{(1 - y)x} \right)
+$$
+
+If $(x, y)$ is a Baby Jubjub point in the Edward form, its equivalent Montgomerry form
+$$
+(u,v) = \left( \frac{u}{v}, \frac{u - 1}{u + 1} \right)
+$$
+
+ 
+#### [1.4]
+$\mathsf{poseidon_n}$ is a poseidon hash function which consumes $n$ number of inputs.
+
+Let
+$$
+y = \mathsf{poseidon_n}([x_1, x_2, ..., x_n]) \\
+$$
+Then, 
+$$
+x_i, y \in \mathbb{F}_p\\
+$$
+Where $i$ is an integer and $0 < i \le n$
+
+The number of rounds of $\mathsf{poseidon_n}$ depends on $n$, and its recommended value is defined in the table2 and table 4 of the [Poseidon hash research paper](https://eprint.iacr.org/2019/458.pdf)
+
+
+
+| $n$ | $t$ | $R_F$ | $R_P$ |
+| -------- | -------- | -------- | -------- |
+| 2     | 3     | 8     | 57     |
+| 3     | 4     | 8     | 56     |
+| 4     | 5     | 8     | 60     |
+
+The implementation that Zkopru uses are
+* Javascript: https://github.com/iden3/circomlib/blob/cf853c1cc96fa537cb1030f70a6f78e5d80ed0e4/src/poseidon.js
+* Circuit: https://github.com/iden3/circomlib/blob/cf853c1cc96fa537cb1030f70a6f78e5d80ed0e4/circuits/poseidon.circom
+
+
+#### [1.5]
+$\mathbf{G}$ is a constant generator point on the babyjubjub curve and its value is $(995203441582195749578291179787384436505546430278305826713579947235728471134,\\ 5472060717959818805561601436314318772137091100104008585924551046643952123905)$.
+
+#### [1.6]
+Let $\mathbf{G}$ be as defined in [1.5]
+$\mathbf{B} = 8 \cdot \mathbf{G}$.
+
+$\mathbf{B}$ is the base point for the EdDSA in Zkopru that has 8 for its cofactor and 2736030358979909402780800718157159386076813972158567259200215660948447373041 for its order.
+
+
+#### [1.7]
+$s$ is the 32 bytes private key of the account. For the seamless user experience, Zkopru uses Ethereum account's private key for its corresponding Zkopru account's private seed key.
+
+#### [1.8]
+Let $r, \mathbb{F}_r$ be defined in [1.2].
+Let $s$ be defined in [1.7].
+
+$a \in \mathbb{F}_r$ is the scalar multiplier that is generated from the private seed key $s$ by the [RFC8032 5.1.5 Key Generation](https://tools.ietf.org/html/rfc8032#section-5.1.5) protocol with blake512 hash function.
+
+1. Hash the 32-byte private key $s$ using $\mathsf{blake512}$, storing the digest in a 64-octet large buffer, denoted h. Only the lower 32 bytes are used for generate the scalar multiplier $a$.
+2. Prune the buffer: Discard the lowest three bits of the first octet and the highest bit of the last octet. And set the second highest bit of the last octet.
+3. Interpret the buffer as the little-endian integer and modularize with $r$, forming a secret scalar $a$.
+
+#### [1.9]
+Let $\mathbf{B}$ be defined in [1.6]
+Let $a$ be defined in [1.8]
+$\mathbf{A} \in \mathbb{G}$ is the EdDSA public key that is $\mathbf{A} = a \cdot \mathbf{B}$.
+
+#### [1.10]
+
+Let $\mathbb{F}_r$ be defined in [1.2].
+Let $s$ be defined in [1.7].
+$v \in \mathbb{F}_r$ is used for a viewing key and a nullifier seed where
+
+$$
+v = keccak256(s)\ mod\ r
+$$
+
+#### [1.11]
+
+Let $\mathsf{poseidon_n}$ be defined in [1.4]
+Let $\mathbf{A}$ be defined in [1.9]
+Let $v$ be defined in [1.10]
+$\mathsf{Pub_{sk}} \in \mathbb{F}_p$ is the public spending key of Zkopru that is
+$$
+\mathsf{Pub_{sk}} = \mathsf{poseidon_3}(x, y, v)
+$$
+where $(x,y) = A$.
+
+#### [1.12]
+
+Let $\mathbb{G}$ be defined in [1.2].
+Let $\mathbf{B}$ be defined in [1.6].
+Let $v$ be defined in [1.10].
+
+$\mathbf{V} \in \mathbb{G}$ is the public viewing key that is
+$$
+\mathbf{V} = v \cdot \mathbf{B}
+$$
+
+#### [1.13]
+
+Let $s$ be defined in [1.7]
+Let $\mathsf{Pub_{sk}}$ be defined in [1.11]
+Let $\mathbf{V}$ be defined in [1.12]
+
+$\mathcal{Z}$ is the Zkopru account address from the private key $s$.
+
+1. Prepare a 512 bits buffer.
+2. Store $\mathsf{Pub_{sk}}$ to the first 256 bits in little-endian mode.
+3. Pack $\mathbf{V}$ into 256 bits data.
+    :::info
+    Point encode/decode protocol: https://tools.ietf.org/html/rfc8032#section-5.1.2
+    :::
+    1. Let $\mathbf{V} = (x,y)$
+    2. Prepare a 256 bits buffer.
+    3. Store $y$ into the buffer in little-endian mode.
+    4. If $x$ is an odd number fill the most significant bit of the last octet.
+4. Store the packed $\mathbf{V}$ to the last 256 bits.
+5. Digest the prepared buffer with keccak256 hash function and take the first 32 bits from the resulting hash value as the checksum data.
+6. Encode the concatenation of the 512 bits data and its 32 bits checksum with Base58 method.
+7. Finally $\mathcal{Z}$ is the encoded result.
+
+#### [1.14]
+
+Let $\mathbb{F}_p$ be defined in [1.1]
+Let $\mathsf{poseidon}_5$ be defined in [1.4]
+Let $s$ be defined in [1.7]
+Let $\mathbf{A}$ be defined in [1.9]
+
+Then $(\mathbf{R}, S)$ is the EdDSA signature of the EdDSA public vector $\mathbf{A}$ for about the message $m \in \mathbb{F}_p$.
+$$
+\mathsf{EdDSA}(\mathbf{A}, m) = (\mathbf{R}, S)
+$$
+
+It follows the [RFC8032](https://tools.ietf.org/html/rfc8032#section-5.1.6) with blake512 hash and $\mathsf{poseidon}_5$ hash function.
+
+1. Sign
+   1. hash the 32 bytes private key $s$ with $\mathsf{blake512}$ hash function. Let $\mathsf{h}$ denote the resulting digest.
+
+for the private key hashing and the prefix generation.
 
 :::info
-Please note that current version is still in WIP. ==Marked texts== will get unmarked when they have more detail explanations.
+Zkopru is using iden3's EdDSA implementation [here](https://github.com/iden3/circomlib/blob/86c6a2a6f5e8de4024a8d366eff9e35351bc1a2e/src/eddsa.js)
 :::
 
-## 1. Account
 
-#### [1.1]
-Elliptic Curve Cryptography in Zkopru uses Babyjubjub curve that is described in [here](https://iden3-docs.readthedocs.io/en/latest/iden3_repos/research/publications/zkproof-standards-workshop-2/baby-jubjub/baby-jubjub.html)
-#### [1.2]
-$poseidon_{X}$ is a poseidon hash function which consumes $X$ inputs as described [here](https://github.com/iden3/circomlib/blob/master/src/poseidon.js).
-#### [1.3]
-$G$ is a constant generator point on the babyjubjub curve.
-#### [1.4]
-$p$ is the private spending key of the note owner.
-#### [1.5]
-$P$ is the point on the babyjubjub curve that is $P=p\cdot G$.
-#### [1.6]
-$v$ is the private viewing key and also the nullifier seed that satisfies $v = keccak256(p)\ mod \ r$ where $r = 21888242871839275222246405745257275088548364400416034343698204186575808495617$.
-#### [1.7]
-$S$ is the public spending key that is $S = poseidon_3(x, y, v)$ where $(x,y) = P$.
-#### [1.8]
-$V$ is public viewing key that is $V = v \cdot G$.
-#### [1.9]
-$li_{U}({U})$ is the leaf index of UTXO ${U}$ in the $Tree_{U}$.
-#### [1.10]
-$nullifier({U}) = poseidon_2(v, li_U({U}))$.
+#### [1.15]
+
+Zkopru uses groth16 and BN254(= BN128) curve for the SNARK pairing. As defined in [2.1. Bilinear Groups](https://eprint.iacr.org/2016/260.pdf) of the groth16 paper, $\mathbb{G_1}$ and $\mathbb{G_2}$ are the group of order $q = 21888242871839275222246405745257275088696311157297823662689037894645226208583$.
 
 ## 2. Note
 
 #### [2.1]
-$h({N})$ is the hash of Zkopru note ${N}$.
+Zkopru note (denoted $\mathsf{N}$) is a tuple $(S, \mathsf{asset}, \mathsf{salt} )$ where
+$S$ is defined in [1.11].
+$\mathsf{asset}$ is defined in [2.2]
+$\mathsf{salt}$: is a random 16 bytes salt data.
+
 #### [2.2]
-Zkopru note ${N}$ contains ETh and token.
+Let $p$ be defined in [1.1]
+Let $\mathsf{poseidon_n}$ be defined in [1.4]
+
+$\mathsf{asset}$ is a tuple of $\mathsf{(v_{eth}, addr_{token}, v_{erc20}, v_{nft})}$ where
+* $\mathsf{v_{eth}}$: The spendable amount of Ether which is less than ${2^{245}}$.
+* $\mathsf{addr_{token}}$: The token contract address if the note contains ERC20 or NFT. The value is less than ${2^{160}}$.
+* $\mathsf{v_{erc20}}$: The spendable amount of ERC20 token if the $\mathsf{addr_{token}}$ is a registered ERC20 token address on the $\mathsf{ZkopruContract}$. Otherwise $\mathsf{v_{erc20}} = 0$.
+* $\mathsf{v_{nft}}$: The token id of the NFT that the note owns. This is less than $p$ and $0$ means it does not own any NFT. Likewise $\mathsf{v_{erc20}}$, ${v_{nft}}$ can be non-zero when only $\mathsf{addr_{token}}$ is a registered ERC721 token address on the $\mathsf{ZkopruContract}$.
+    :::warning
+    NFTs with ID 0 cannot be deposited on the $\mathsf{ZkopruContract}$.
+    ::    :
+
 #### [2.3]
-$asset_{eth}({N})$ is the amount of Ether that the note ${N}$ contains.
+Let $\mathsf{asset, (v_{eth}, addr_{token}, v_{erc20}, v_{nft})}$ be defined in [2.2]
+Then, the hash of the asset is computed by:
+$$
+\mathsf{hash(\mathsf{asset})} = \mathsf{poseidon_4}(\mathsf{v_{eth}, addr_{token}, v_{erc20}, v_{nft}})
+$$
+
+
+
 #### [2.4]
-$asset_{token}({N})$ is the token address if the note ${N}$ contains ERC20 or ERC721 tokens.
-#### [2.5]
-$asset_{erc20}({N})$ is the amount of token if the $asset_{token}$ is registered as an ERC20 token on the layer 1 or $0$.
-#### [2.6]
-$asset_{nft}({N})$ is the amount of token if the $asset_{token}$ is registered as an ERC721 token on the layer 1 or $0$.
-#### [2.7]
-Asset of ${N}$ is $Asset({N}) = \{asset_{eth}({N}), asset_{token}({N}), asset_{erc20}({N}), asset_{nft}({N})\}$.
-#### [2.8]
-Asset hash is $h(Asset({N})) = poseidon_4(asset_{eth}({N}), asset_{token}({N}), asset_{erc20}({N}), asset_{nft}({N}))$.
-#### [2.9]
-$salt({N})$ is a random 16 bytes value for ${N}$.
-#### [2.10]
- The hash of the note $h({N}) = poseidon_3(S({N}), salt({N}), h(Asset({N})))$ where $S({N})$ is the public spending key for ${N}$.
+Let $\mathsf{poseidon_n}$ be defined in [1.4]
+Let $S, \mathsf{N, asset, salt}$ be defined in [2.1]
+Let $\mathsf{hash(\mathsf{asset})}$ be defined in [2.3]
+Then, the hash value of the note is computed by:
+$$
+\mathsf{hash}(\mathsf{N}) = \mathsf{poseidon_3}(S, \mathsf{salt}, \mathsf{hash(\mathsf{asset})})
+$$
 
 ## 3.Transaction 
+
+:::info
+Please note that the information written in $\mathcal{Calligraphic}$ typeface is known to everyone while information written in $\mathrm{Roman}$ typeface is only known to the prover.
+:::
+
 ### 3.1 Basic definitions
+
 #### [3.1.1]
-A Zkopru transaction ${TX}^{(n)}_i$ is the $i$-th transaction of the $n$-th block.
+
+Let $\mathsf{N}$ be defined in [2.1].
+Let $\mathsf{hash}(\mathsf{N})$ be defined in [2.4].
+
+The transaction output of Zkopru
+$$
+\mathrm{Out} = (\mathsf{N}, t, \mathcal{N})
+$$
+
+where $t$ is the type of the output and $\mathcal{N}$ is the public signals of the output that is
+
+$\mathcal{N} = \mathsf{(to, v'_{eth}, addr'_{token}, v'_{erc20}, v'_{nft}, fee_{L1})} \\
+\ = \left\{\begin{array}{lr}
+        (0, 0, 0, 0, 0, 0) & \text{for } t = 0 & \text{(utxo)}\\
+        \mathsf{(recipient, v_{eth}, addr_{token}, v_{erc20}, v_{nft}, fee_{caller})} & \text{for } t = 1 & \text{(withdrawal)}\\
+        \mathsf{(dest, v_{eth}, addr_{token}, v_{erc20}, v_{nft}, fee_{migration})} & \text{for } t = 2 &  \text{(migration)}
+        \end{array}\right\}$
+
+Then, the public outflow data is defined as
+
+$$
+\mathcal{Out} = (\mathsf{hash}(\mathsf{N}), t, \mathcal{N})
+$$
 
 #### [3.1.2]
 
-A zkopru transaction, that consumes $m$ UTXOs and creates $n$ outputs, should have a proof against SNARK circuit $Circuit(m,n)$.
+Let $\mathsf{t}$ be defined in [3.1.1]
+$\mathrm{U}$ is a UTXO type raw transaction output $\mathrm{Out}$ which $t = 0$ while $\mathcal{U}$ is its corresponding public output $\mathcal{Out}$.
 
-#### [3.1.2]
-$m$ and $n$ both belong to the set $\{1 ,2, 3, 4\}$.
+Then, $\mathsf{hash}(\mathrm{U}) = \mathsf{hash(N)}$.
 
 #### [3.1.3]
-${U}$ is a UTXO type transaction output and it contains note ${N}$
+Let $\mathsf{t}$ be defined in [3.1.1]
+$\mathrm{W}$ is a withdrawal type raw transaction output $\mathrm{Out}$ which $t = 1$ while $\mathcal{W}$ is its corresponding public output $\mathcal{Out}$.
+
+Then,
+$\mathsf{hash}(\mathcal{W}) = keccak256(\mathsf{encodePacked(\mathcal{W})})$
+
+where $\mathsf{encodePacked(\mathcal{W})}$ is 200 bytes data that is encoded with big-endian by the following table:
+| Position  | Size       | Data     |
+| --------- | ---------  | -------- |
+| 0-32      | 32 bytes   | $\mathsf{hash(N)}$        |
+| 32-52     | 20 bytes   | $\mathcal{N}.\mathsf{to}$ |
+| 52-84     | 32 bytes   | $\mathcal{N}.\mathsf{v_{eth}}$ |
+| 84-104    | 20 bytes   | $\mathcal{N}.\mathsf{addr_{token}}$ |
+| 104-136   | 32 bytes   | $\mathcal{N}.\mathsf{v_{erc20}}$ |
+| 136-168   | 32 bytes   | $\mathcal{N}.\mathsf{v_{nft}}$ |
+| 168-200   | 32 bytes   | $\mathcal{N}.\mathsf{fee_{L1}}$ |
+
+
 
 #### [3.1.4]
-${W}$ is a withdrawal type transaction output and it contains $\{{N}, fee\}$ where $fee$ is the additional fee for instant withdrawal as defiend in ==X.Y.Z==
+Let $\mathsf{t}$ be defined in [3.1.1]
+$\mathrm{M}$ is a migration type raw transaction output $\mathrm{Out}$ which $t = 2$ and $\mathsf{hash}(\mathrm{M}) = \mathsf{hash(N)}$.
+And $\mathcal{M}$ is its corresponding public output $\mathcal{Out}$
 
 #### [3.1.5]
-${M}$ is a migration type transaction output and it contains $\{{N}, dest, fee\}$ where $dest$ is the contract address of the destination network and $fee$ is the additional fee for the destination network block proposer as defiend in ==X.Y.Z==
+
+Let $\mathrm{U}$ be defined in [3.1.2].
+Let $\mathsf{Tree_\mathsf{utxo}}$ be defined in [5.3.1].
+
+$\mathsf{pos}(\mathrm{U})$ is the leaf index of $\mathrm{U}$ in the UTXO Merkle tree $\mathsf{Tree}_\mathsf{utxo}$.
 
 #### [3.1.6]
 
-Let's define transaction output ${O} = \left\{\begin{array}{lr}
-        {U} & \text{for } t({O}) = 0\\
-        {W} & \text{for } t({O}) = 1\\
-        {M} & \text{for } t({O}) = 2\\
-        \end{array}\right\}$
-where $t({O})$ means the output type.
+Let $v$ be defined in [1.10]
+Let $\mathrm{U}$ be defined in [3.1.2].
+Let $\mathsf{pos}(\mathrm{U})$ be defined in [3.1.5].
+
+Then the nullifier that prevents double spending is computed by:
+
+$$
+\mathsf{nullifier}(\mathrm{U}) = \mathsf{poseidon_2}(v, \mathsf{pos}(\mathrm{U}))
+$$
 
 #### [3.1.7]
-$root_{UTXO}^{(n)}$ is the root of the UTXO tree at the $n$-th layer 2 block.
+
+Let $\mathsf{hash}(\mathsf{N})$ be defined in [2.4].
+Let $\mathrm{U}$ be defined in [3.1.1].
+Let $\mathsf{pos}(\mathrm{U})$ be defined in [3.1.5].
+Let $\mathsf{Tree_\mathsf{utxo}}$ be defined in [5.3.1].
+Let $\mathsf{root_{utxo}}^{(n)}$ be defined in [6.1.2].
+
+Let the root of $\mathsf{Tree}_\mathsf{utxo}$ at the $n$-th layer 2 block be denoted $\mathsf{root_{utxo}}^{(n)}$.
+$\mathsf{Sib}_\mathsf{utxo}^{(n)}(\mathrm{U})$ is the set of all sibling node data of UTXO $\mathrm{U}$ at the $n$-th layer 2 block.
+
+Then $\mathsf{Merkle}^{(n)}_\mathsf{utxo}(\mathrm{U}) = (\mathsf{hash}(\mathrm{U}), \mathsf{pos}(\mathrm{U}), \mathsf{root_{utxo}}^{(n)}, \mathsf{Sib}_\mathrm{U}^{(n)}(\mathrm{U}))$ that satisfies the Merkle tree inclusion proof.
 
 #### [3.1.8]
-$Sib_{UTXO}^{(n)}({U})$ is the set of all sibling node data of UTXO ${U}$ at the $n$-th layer 2 block.
 
-### 3.2 Spending
+Let $\mathsf{Merkle}_\mathsf{utxo}^{(n)}$ be defined in [3.1.7]
+
+The confidential data of the $i$-th input note
+$$
+\mathrm{In}_i = (\mathrm{U}, (\mathbf{A}, v), \mathbf{R}, S, \mathsf{Merkle}_\mathsf{utxo}^{(n)}(\mathrm{U}), \mathsf{nullifier}(\mathrm{U}))
+$$
+
+where
+
+1. $\mathsf{poseidon}_3(x, y, v) == \mathsf{Pub_{sk}}$  where $\mathbf{A} = (x, y)$
+2. $\mathsf{hash}(\mathrm{U}), \mathbf{A}, \mathbf{R}, S$ satisfies [1.14]
+3. $\mathsf{nullifier}(\mathrm{U})$ satisfies [3.1.6]
+
+Then, its public inflow data is defined as
+$$
+\mathcal{In} = (\mathsf{nullifier}(\mathrm{U}), \mathsf{root_{utxo}}^{(n)})
+$$
+
+
+#### [3.1.9]
+
+Let $\mathrm{U}$ be defined in [3.1.2]
+Let $\mathrm{W}$ be defined in [3.1.3]
+Let $\mathrm{M}$ be defined in [3.1.4]
+Let $\mathrm{In}$ and $\mathcal{In}$ be defined in [3.1.8]
+Let $\mathrm{Out}$ and $\mathcal{Out}$ be defined in [3.1.1]
+
+Then, $\mathrm{Flow}$ is the set of raw inflow and outflow:
+$$
+\mathrm{Flow} = (\mathrm{[In_1, ..., In_m], [Out_1, ..., Out_n]})
+$$
+
+while $\mathcal{Flow}$ is the hidings of $\mathrm{Flow}$ which corresponds to $\mathrm{Flow}$
+$$
+\mathcal{Flow} = (\mathcal{[In_1, ..., In_m], [Out_1, ..., Out_n]})
+$$
+
+#### [3.1.10]
+
+Let $\mathrm{Flow}$ be defined in [3.1.9]
+
+Then, a raw transaction $\mathrm{Tx}$ is
+
+$$
+\mathrm{Tx} = (\mathrm{Flow}, f, \mathsf{swap})
+$$
+
+
+where $f$ is the fee for the layer 2 block proposer and $\mathsf{swap}$ is the desired atomic swap output from its paired transaction as defined in ==X.Y.Z==.
+
+### 3.2 ZKP
+
 #### [3.2.1]
-$i$ belongs to the set $\{1, ..., m\}$ and ${U}_i$ is an input UTXO of Zkopru transaction.
+
+$\mathsf{C}_{(x,y)}$ is a Zkopru circuit that consumes $x$ inputs and emits $y$ outputs. 
+
 #### [3.2.2]
-To spend UTXO ${U}_i$, prover knows $p({U}_i)$, $P({U}_i)$, $nullifier({U}_i)$, $salt({U}_i)$, $asset_{eth}({U}_i)$, $asset_{token}({U}_i)$, $asset_{erc20}({U}_i)$, $asset_{nft}({U}_i)$, ${li({U}_i)}$, $Sib_{UTXO}^{(n)}({U}_i)$, $root_{UTXO}^{(n)}$, and $v({U}_i)$ for each ${U}_i$.
+
+Let $\mathsf{C}_{(x,y)}$ be defined in [3.2.1].
+
+$\mathsf{zPK}_{(x,y)}$ is the proving key for the circuit $\mathsf{C}_{(x,y)}$ and should be setup by the multi party computation.
+
 #### [3.2.3]
-Prover reveals $root_{UTXO}^{(n)}$ and $nullifier({U}_i)$ while hiding $p({U}_i)$, $P({U}_i)$, $v({U}_i)$, $salt({U}_i)$, $asset_{eth}({U}_i)$, $asset_{token}({U}_i)$, $asset_{erc20}({U}_i)$, $asset_{nft}({U}_i)$, ${li({U}_i)}$, and $Sib_{UTXO}^{(n)}({U}_i)$ of each ${U}_i$
+
+Let $\mathsf{C}_{(x,y)}$ be defined in [3.2.1].
+Let $\mathsf{zPK}_{(x,y)}$ be defined in [3.2.2].
+
+$\mathsf{zVK}_{(x,y)}$ is the verifying key for the circuit $\mathsf{C}_{(x,y)}$ that corresponds to the proving key $\mathsf{zPK}_{(x,y)}$.
+
 #### [3.2.4]
-Revealed data $root_{UTXO}^{(n)}$ and $nullifier({U}_i)$ satisfies the optimistic rollup condition ==[X.Y.Z]==
-#### [3.2.5]
-For each ${U}_i$, prover calculates the EdDSA signatures using private key $p$ and target value $h({U}_i)$ and get $sigR8({U}_i)$ and $sigS({U}_i)$.
-#### [3.2.6]
-Prover provides $sigR8({U}_i)$, $sigS({U}_i)$, $P({U}_i)$, $n({U}_i)$, $salt_i({U}_i)$, $asset_{eth}({U}_i)$, $asset_{token}({U}_i)$, $asset_{erc20}({U}_i)$, $asset_{nft}({U}_i)$, ${li({U}_i)}$, ${Sib^{(n)}_UTXO({U}_i)}$, $root_{UTXO}^{(n)}$, and $nullifier({U}_i)$ into the $Circuit(m,n)$ and they satisfy the following SNARK conditions.
+
+Let $\mathrm{In}$ and $\mathcal{In}$ be defined in [3.1.8]
+Let $\mathrm{Flow}, \mathcal{Flow}$ be defined in [3.1.9]
+Let $f, \mathsf{swap}$ be defined in [3.1.10]
+Let $\mathsf{C}_{(x,y)}$ be defined in [3.2.1].
+
+Then a prover can generate a witness
+$$
+\mathsf{w} \leftarrow \mathsf{witness}(\mathsf{C}_{(m,n)}, \mathrm{Flow}, \mathcal{Flow}, f, \mathsf{swap})
+$$
+when$(\mathsf{C}_{(m,n)}, \mathrm{Flow}, \mathcal{Flow}, f, \mathsf{swap})$ satisfies the conditions:
 
 <div style="padding-left: 5rem">
 
-#### [3.2.5.1]
-$S({U}_i)$ is calculated inside $Circuit(m,n)$ and the $\{P({U}_i), n({U}_i)\}$ satisfies condition [[1.7]](#1.7).
-#### [3.2.5.2]
-$h({U}_i)$ is calculated inside $Circuit(m,n)$ and $\{ h({U}_i), ({U}_i), salt({U}_i)\}$ satisfies condition [[2.10]](#2.10).
-#### [3.2.5.3]
-$EdDSA(sigR8({U}_i), sigS({U}_i), h({U}_i)) == P({U}_i)$
-#### [3.2.5.4]
-$nullifier({U}_i)$ is calculated inside $Circuit(m,n)$ and $\{nullifier({U}_i), v({U}_i), li({U}_i)\}$ satisfies condition [[1.10]](#1.10).
-#### [3.2.5.5]
-$MerkleRoot_{Poseidon_2}(li({U}_i), {U}_i, Sib_{UTXO}^{(n)}({U}_i)) == root_{UTXO}^{(n)}$
-#### [3.2.5.6]
-$asset_{eth}({U}_i)$ and $asset_{erc20}({U}_i)$ are less than $2^{245}$ to prevent overflow in SNARK.
-#### [3.2.5.7]
-$asset_{erc20}({U}_i)$ or $asset_{nft}({U}_i)$ should be zero.
+#### [3.2.4.1] - Nullifier proof
 
-</div>
+Let $\mathrm{In}$ be the part of $\mathrm{Flow}$ as defined in [3.1.9]
 
-### 3.3 Outputs
+Each $\mathrm{In}$ should satisfy the conditions in [3.1.6]
 
 
-#### [3.3.1]
-$j$ belongs to the set $\{1, ..., n\}$ and ${O}_j$ is a transaction output of a Zkopru transaction.
-#### [3.3.2]
-Output has 3 types and the type value $t_j$ belongs to the set $\{0, 1, 2\}$.
-#### [3.3.3]
-To create new outputs ${O}_j$, prover knows $S({O}_j)$, $salt({O}_j)$, $asset_{eth}({O}_j)$, $asset_{token}({O}_j)$, $asset_{erc20}({O}_j)$, $asset_{nft}({O}_j)$, $h({O}_j)$, and $t({O}_j)$ for each new output notes.
-#### [3.3.4]
-Prover reveals $h({O}_j)$, $t({O}_j)$ while hiding $S({O}_j)$, $salt({O}_j)$, $asset_{eth}({O}_j)$, $asset_{token}({O}_j)$, $asset_{erc20}({O}_j)$, $asset_{nft}({O}_j)$.
-#### [3.3.5]
-$data_{to}({O}_j)$, $data_{eth}({O}_j)$, $data_{token}({O}_j)$, $data_{erc20}({O}_j)$, $data_{erc721}({O}_j)$, and $data_{fee}({O}_j)$ are public data set for layer 1 interactions such as withdrawal or migration.
-#### [3.3.6]
-If $t({O}_j)$ is $0$, $data_{to}({O}_j)$, $data_{eth}({O}_j)$, $data_{token}({O}_j)$, $data_{erc20}({O}_j)$, $data_{erc721}({O}_j)$, and $data_{fee}({O}_j)$ are all 0.
-#### [3.3.7]
-If $t({O}_j)$ is $1$ or $2$, the prover knows $\{data_{to}({O}_j), data_{eth}({O}_j), data_{token}({O}_j), data_{erc20}({O}_j), data_{erc721}({O}_j), data_{fee}({O}_j)\}$ and reveals them.
-#### [3.3.8]
-If $t_j$ is 0, it satisfies optimistic rollup condition ==[X.Y.Z]== to update $Tree_{U}$.
-#### [3.3.9]
-If $t_j$ is 1, it satisfies optimistic rollup condition ==[X.Y.Z]== to update $Tree_{Withdrawal}$.
-#### [3.3.10]
-If $t_j$ is 2, it satisfies optimistic rollup condition ==[X.Y.Z]== for the inter layer-2 migration.
-#### [3.3.11]
-Prover provides $S({O}_j)$, $salt({O}_j)$, $asset_{eth}({O}_j)$, $asset_{token}({O}_j)$, $asset_{erc20}({O}_j)$, $asset_{nft}({O}_j)$, $h({O}_j)$, $t({O}_j)$, $data_{to}({O}_j)$, $data_{eth}({O}_j)$, $data_{token}({O}_j)$, $data_{erc20}({O}_j)$, $data_{erc721}({O}_j)$, and $data_{fee}({O}_j)$ to the $Circuit(m,n)$ and they satisfy the following SNARK conditions.
-<div style="padding-left: 5rem">
+#### [3.2.4.2] - Ownership proof
 
-#### [3.3.11.1]
-$\{S({O}_j), salt({O}_j), asset_{eth}({O}_j), asset_{token}({O}_j), asset_{erc20}({O}_j), asset_{nft}({O}_j), h({O}_j)\}$ satisfies condition [[2.10]](#2.10).
-#### [3.3.11.2]
-$\{t({O}_j), data_{to}({O}_j), data_{eth}({O}_j), data_{token}({O}_j), data_{erc20}({O}_j), data_{erc721}({O}_j), data_{fee}({O}_j)\}$ satisfies condition [[3.3.6]](#3.3.6). and condition [[3.3.7]](#3.3.7).
-#### [3.3.11.3]
-$asset_{eth}({O}_j)$, $asset_{erc20}({O}_j)$ are less than $2^{245}$ to prevent overflow in SNARK.
-#### [3.3.11.4]
-$asset_{erc20}({O}_j)$ or $asset_{nft}({O}_j)$ should be zero.
+Let $\mathrm{In}$ be the part of $\mathrm{Flow}$ as defined in [3.1.9]
 
-</div>
+Each $\mathrm{In}$ should satisfy the conditions in [3.1.8]
 
-### 3.4 Zero-sum
+#### [3.2.4.3] - Existence Proof(inclusion proof)
 
-Let's define $filter(x,y)$ as $filter(x,y) = \left\{\begin{array}{lr}
+Let $\mathrm{U}$ be the part of $\mathrm{In}$ as defined in [3.1.8]
+
+Each $\mathrm{U}$ should satisfy the conditions in [3.1.7]
+
+#### [3.2.4.4] - Public signal proof
+
+Let $\mathrm{Out}$ be the part of $\mathrm{Flow}$ as defined in [3.1.9]
+Let $\mathcal{Out}$ be the part of $\mathcal{Flow}$ as defined in [3.1.9]
+
+Then,
+
+$\mathcal{Out}_i$ and $\mathrm{Out}_i$ should satisfty the condition [3.1.1]
+
+#### [3.2.4.5] - Range limit proof to prevent overflow
+
+Let $\mathrm{In}$ be the part of $\mathrm{Flow}$ as defined in [3.1.9]
+Let $\mathrm{Out}$ be the part of $\mathrm{Flow}$ as defined in [3.1.9]
+
+Then,
+
+$\mathsf{v_{eth}}$ of $\mathrm{In}$ should be less than $2^{245}$
+$\mathsf{v_{erc20}}$ of $\mathrm{In}$ should be less than $2^{245}$
+$\mathsf{v_{eth}}$ of $\mathrm{Out}$ should be less than $2^{245}$
+$\mathsf{v_{erc20}}$ of $\mathrm{Out}$ should be less than $2^{245}$
+
+
+#### [3.2.4.6] - Zero-sum proof
+
+#### [3.2.4.6.1] - Ether
+
+Let $\mathsf{v^{(\mathrm{In})}_{eth}}$ be the Ether value of the note $\mathsf{N}$ of $\mathrm{In}$
+Let $\mathsf{v^{(\mathrm{Out})}_{eth}}$ be the Ether value of the note $\mathsf{N}$ of $\mathrm{Out}$
+Let $f$ be defined in [3.1.10]
+
+Then,
+
+$$
+\Sigma_{i=1}^{x} \mathsf{v^{(\mathrm{In}_i)}_{eth}} = \Sigma_{i=1}^{y} \mathsf{v^{(\mathrm{Out}_i)}_{eth}} + f
+$$
+
+#### [3.2.4.6.2] - ERC20
+
+Let $\mathsf{v^{(\mathrm{In})}_{erc20}}$ be the ERC20 value of the note $\mathsf{N}$ of $\mathrm{In}$
+Let $\mathsf{v^{(\mathrm{Out})}_{erc20}}$ be the ERC20 value of the note $\mathsf{N}$ of $\mathrm{Out}$
+
+Let $\mathsf{addr^{(\mathrm{In})}_{token}}$ be the token value of the note $\mathsf{N}$ of $\mathrm{In}$.
+Let $\mathsf{addr^{(\mathrm{Out})}_{token}}$ be the token value of the note $\mathsf{N}$ of $\mathrm{Out}$.
+
+Let's define a fillter function $ftr(x,y)$ as $ftr(x,y) = \left\{\begin{array}{lr}
         0 & \text{for } x \neq y\\
         1 & \text{for } x  = y\\
         \end{array}\right\}$
 
+Then for each $\mathsf{addr} \in \{\mathsf{addr^{(\mathrm{In}_1)}_{token}}, ..., \mathsf{addr^{(\mathrm{In}_x)}_{token}}, \mathsf{addr^{(\mathrm{Out}_1)}_{token}}, ..., \mathsf{addr^{(\mathrm{Out}_y)}_{token}}\}$
+
+It should satisfy
+$$
+\Sigma_{i=1}^{x} \mathsf{v^{(\mathrm{In}_i)}_{erc20}}\cdot ftr(\mathsf{addr}, \mathsf{addr^{(\mathrm{In}_i)}_{token}}) = \Sigma_{i=1}^{y} \mathsf{v^{(\mathrm{Out}_i)}_{erc20}}\cdot ftr(\mathsf{addr}, \mathsf{addr^{(\mathrm{Out}_i)}_{token}})
+$$
+
+#### [3.2.4.6.3] - ERC721
+
+Let $\mathsf{v^{(\mathrm{In})}_{nft}}$ be the NFT id of the note $\mathsf{N}$ of $\mathrm{In}$
+Let $\mathsf{v^{(\mathrm{Out})}_{nft}}$ be the NFT id of the note $\mathsf{N}$ of $\mathrm{Out}$
+
+Let $\mathsf{addr^{(\mathrm{In})}_{token}}$ be the token value of the note $\mathsf{N}$ of $\mathrm{In}$.
+Let $\mathsf{addr^{(\mathrm{Out})}_{token}}$ be the token value of the note $\mathsf{N}$ of $\mathrm{Out}$.
+
+Let $ftr$ be defined in [3.2.4.6.2]
+
+Then for each $\mathsf{addr}$ and $\mathsf{nft}$ where
+$$
+\mathsf{addr} \in \{\mathsf{addr^{(\mathrm{In}_1)}_{token}}, ..., \mathsf{addr^{(\mathrm{In}_x)}_{token}}, \mathsf{addr^{(\mathrm{Out}_1)}_{token}}, ..., \mathsf{addr^{(\mathrm{Out}_y)}_{token}}\} \\
+\mathsf{nft} \in \{\mathsf{v^{(\mathrm{In}_1)}_{nft}}, ..., \mathsf{v^{(\mathrm{In}_x)}_{nft}}, \mathsf{v^{(\mathrm{Out}_1)}_{nft}}, ..., \mathsf{v^{(\mathrm{Out}_y)}_{nft}}\}
+$$
+
+It should satisfy
+$$
+\Sigma_{i=1}^{x} ftr(\mathsf{nft}, \mathsf{v^{(\mathrm{In}_i)}_{nft}})\cdot ftr(\mathsf{addr}, \mathsf{addr^{(\mathrm{In}_i)}_{token}}) = \Sigma_{i=1}^{y} ftr(\mathsf{nft}, \mathsf{v^{(\mathrm{Out}_i)}_{nft}})\cdot ftr(\mathsf{addr}, \mathsf{addr^{(\mathrm{Out}_i)}_{token}})
+$$
+
+</div>
+
+#### [3.2.5] - Proof Generation
+
+Let $\mathbb{G_1}$ and $\mathbb{G_2}$ be defined in [1.15]
+Let $\mathsf{C}_{(x,y)}$ be defined in [3.2.1].
+Let $\mathsf{zPK}_{(x,y)}$ be defined in [3.2.2].
+Let $\mathsf{w}$ be defined in [3.2.4]
+
+Let $\mathsf{prove_{groth16}}$ be the SNARK proving system defined in [https://eprint.iacr.org/2016/260.pdf](https://eprint.iacr.org/2016/260.pdf)
+
+Then the prover can generate the SNARK proof $\pi$ using the proving key $\mathsf{zPK}_{(x,y)}$:
+$$
+\pi \leftarrow \mathsf{prove_{groth16}}(\mathsf{w}, \mathsf{zPK}_{(x,y)}) \\
+\pi = (\mathbf{A}, \mathbf{B}, \mathbf{C})
+$$
+where $\mathbf{A, C} \in \mathbb{G_1}$ and $\mathbf{B} \in \mathbb{G_2}$
+
+#### [3.2.6] - Proof Verification
+
+Let $\mathsf{C}_{(x,y)}$ be defined in [3.2.1].
+Let $\mathsf{zVK}_{(x,y)}$ be defined in [3.2.3].
+Let $\mathcal{Flow}$ be defined in [3.1.9]
+Let $f, \mathsf{swap}$ be defined in [3.1.10]
+
+Then define the public signal set $\mathcal{P}$ as
+
+$$
+\mathcal{P} = (\mathcal{Flow}, f, \mathsf{swap})
+$$
+
+then verifiers can verify the zero-knowledge proof using
+
+$$
+\mathsf{verify_{groth16}}(\mathcal{P}, \pi, \mathsf{zVK}_{(x,y)}) \in \{0, 1\}
+$$
+
+### 3.3 Memo
+
+As all information is shielded properly, there should be a memo field to help the recipient decode the receiving note correctly. As it's an optimistic rollup, the size of calldata increases the transaction cost. Therefore, memo filed only supports output notes that have only one value among Ether, ERC20 and NFT.
+
+Note that the memo field is used for the easy communication without constructing any additional p2p networking layer between wallets.
+
+#### [3.3.1] - Encryption
+
+Let $\mathbf{B}$ be defined in [1.6]
+Let $\mathbf{V}$ be defined in [1.12]
+Let $\mathsf{salt}$ be defined in [2.1]
+Let $\mathrm{Tx}$ be defined in [3.1.10]
+Let $\mathsf{tokenId()}$ be defined in [4.6.1].
+Let $\mathsf{encode()}$ be the point encode function that is defined in [1.13]
+
+1. The transaction builder pick 1 output $\mathrm{Out}$ from $\mathrm{Tx}$ to include in the memo.
+2. Generate a public shared key using ECDH
+    1. Get the viewing public key $\mathbf{V}_{}$ by parsing the zk address of $\mathrm{Out}$ as defined in [1.13]
+    2. Create a random 16 bytes ephemeral secret key $e$
+    3. Generate the public ephemeral key $\mathbf{E}$ where $\mathbf{E} = e \cdot \mathbf{B}$.
+    4. Generate the shared public key $\mathbf{S}$ where $\mathbf{S} = e \cdot \mathbf{V} = v \cdot \mathbf{E}$ where $v$ is the secret viewing key of $\mathrm{Out}$ owner.
+    5. The encryption key $\mathsf{key} = \mathsf{encode(\mathbf{S})}$
+3. Prepare the data to encrypt
+    1. Prepare a 49 bytes buffer
+    1. Store $\mathsf{salt}$ to the first 16 bytes with big-endian.
+    2. Get the 1 byte $\mathsf{tokenId(addr_{token})}$ of $\mathrm{Out}$ and store it to the 17-th byte.
+    3. $\mathsf{v}$ is one of $\mathsf{v_{eth}}$ or $\mathsf{v_{erc20}}$ or $\mathsf{v_{nft}}$. Store $\mathsf{v}$ into the 18-th bytes with big-endian.
+
+4. Run encryption using the shared key with [chacha20](https://tools.ietf.org/html/rfc7539)
+     $\mathsf{secret} = \mathsf{(salt, tokenId, v)}$
+     $\mathsf{ciphertext} \leftarrow \mathsf{chacha20(secret, key)}$
+
+5. Pack
+    1. Prepare 81 bytes buffer
+    2. Store $\mathsf{encode(\mathbf{E})}$ to the first 32 bytes.
+    3. Store the encrypted 49 bytes of cipher text to the 33-rd byte and complete the 81 bytes memo field.
+    $$
+    \mathsf{memo} = (\mathsf{encode}(\mathbf{E}), \mathsf{ciphertext})
+    $$
+
+#### [3.3.2] - Decryption
+
+To receive Zkopru note, recipient should try to decrypt memo field to find own notes.
+
+Let $\mathcal{Out}$ be defined in [3.1.1]
+Let $\mathcal{Flow}$ be defined in [3.1.9]
+Let $\mathsf{encode()}$ be the point encode function that is defined in [1.13]
+
+1. Parse the first 31 bytes of public ephemeral key data and decode it to $\mathbf{E}$
+2. Compute the scalar multiplication with the viewing key $v$ and get the shared public key $\mathbf{S}$.
+3. Encode the public shared key $S$ and get the chacha20 cipher $\mathsf{key}$
+4. Parse the remaining 49 bytes of the memo field and decrypt the value using $\mathsf{key}$ and get $\mathsf{secret' = (salt', tokenId', v')}$. Please note that we're not sure $\mathsf{secret}'$ is a correctly decrypted one.
+5. Fetch registered token addresses from the layer 1 smart contract. And filter them and get addresses which token id is same with $\mathsf{tokenId'}$
+6. For each token addresses, try to construct a output note with 3 cases:
+    a. $\mathsf{v_{eth} = v', v_{erc20} = 0, v_{nft} = 0}$
+    b. $\mathsf{v_{eth} = 0, v_{erc20} = v', v_{nft} = 0}$
+    c. $\mathsf{v_{eth} = 0, v_{erc20} = 0, v_{nft} = v'}$
+7. Compute the contructed output note's hash value and compare them to $\mathcal{Out}$s.
+8. If it succeeds to find the exact same hash, then the decryption suceeds. Or the transaction is not containing a proper memo field for that viewing key owner.
+
+### 3.4 Shielded transaction
+
 #### [3.4.1]
 
-To prove the sum of input assets is equal to the sum of output assets, the prover knows $\{asset_{eth}({U}), asset_{eth}({O}), asset_{token}({U}), asset_{token}({O}), asset_{erc20}({U}), asset_{erc20}({O}), asset_{nft}({U}), asset_{nft}({O}), data_{fee}({O}), f\}$ where $U \in [U_1, ..., U_m]$ and $O \in [O_1, ..., O_n]$. And they satisfies [[3.4.2]](#3.4.2), [[3.4.3]](#3.4.3), and [[3.4.4]](#3.4.4).
+Let $\pi$ be defined in [3.2.5]
+Let $\mathcal{P}$ be defined in [3.2.6]
+Let $\mathsf{memo}$ be defined in [3.3.1]
+
+Then, the shielded transaction $\mathcal{Tx}$ is
+
+$$
+\mathcal{Tx} = (\mathcal{P}, \pi, \mathsf{memo})
+$$
+where the public signals
+$$
+\mathcal{P} = (\mathcal{[In_1, ..., In_m], [Out_1, ..., Out_n]}, f, \mathsf{swap})
+$$
+
+
+## 4. Optimistic Roll Up
+
+### 4.1 Layer 1
+
+#### [4.1.1] Storage Variable
+Zkopru's optimistic rollup manages the singleton storage variable `chain` which type is
+```solidity
+struct Blockchain {
+    bytes32 genesis;
+    bytes32 latest;
+    // For coordinating
+    uint256 proposedBlocks;
+    mapping(address => Proposer) proposers;
+    mapping(bytes32 => Proposal) proposals;
+    mapping(bytes32 => bool) finalized; // blockhash => finalized?
+    mapping(bytes32 => bool) slashed; // blockhash => slashed
+    // For inclusion reference
+    mapping(bytes32 => bytes32) parentOf; // childBlockHash => parentBlockHash
+    mapping(bytes32 => uint256) utxoRootOf; // blockhash => utxoRoot
+    mapping(uint256 => bool) finalizedUTXORoots; // all finalized utxo roots
+    // For deposit
+    MassDeposit stagedDeposits;
+    uint256 stagedSize;
+    uint256 massDepositId;
+    mapping(bytes32 => uint256) committedDeposits;
+    // For withdrawal
+    mapping(bytes32 => uint256) withdrawalRootOf; // header => withdrawalRoot
+    mapping(bytes32 => bool) withdrawn;
+    mapping(bytes32 => address) newWithdrawalOwner;
+    // For migrations
+    mapping(bytes32 => bool) migrations;
+    // For ERC20 and ERC721
+    mapping(address => bool) registeredERC20s;
+    mapping(address => bool) registeredERC721s;
+}
+
+contract Zkopru ... {
+    ...
+    Blockchain chain;
+    ...
+}
+```
+
+Let's denote the `chain` variable on the address `addr` as `Zkopru(addr).chain`. In addition we will denote the latest block of a Zkopru network on address `addr`  like `Zkopru(addr).chain.latest`
+
+#### [4.1.2] Configurations
+
+
+| Symbol | Value | Description |
+| -------- | -------- | -------- |
+| $C_{utxo-tree-depth}$ | 48 | UTXO tree depth. It affects the SNARK proving time. |
+| $C_{max-utxo}$ | 281474976710656 | We can use this tree for about 45000 years when we have 100 TPS with 2 output notes for 1 transaction. |
+| $C_{withdrawal-tree-depth}$ | 48 | UTXO tree depth. |
+| $C_{max-withdrawal}$ | 281474976710656 | We can use this tree for about 90000 years when we have 100 TPS with 1 withdrawal note for 1 transaction.|
+| $C_{nullifier-tree-depth}$ | 254 | Nullifier tree's depth is 254. |
+| $C_{utxo-sub-tree-depth}$ | 5 | A UTXO subtree's depth is 5.|
+| $C_{utxo-sub-tree-size}$ | 32 | A UTXO subtree has 32 leaves. |
+| $C_{withdrawal-sub-tree-depth}$ | 5 | A Withdrawal subtree's depth is 5. |
+| $C_{withdrawal-sub-tree-size}$ | 32 | A withdrawal subtree has 32 leaves. |
+| $C_{max-block-size}$ | 200000 | Block should not be too large. Unit in byte. |
+| $C_{max-validation-gas}$ | 6000000 | Block proposer should not submit a block which validation process exceeds the given gas limit |
+| $C_{challenge-period}$ | 46253     | Challenge period in block number unit. |
+| $C_{minimum-stake}$ | 32e18     | Minimum amount of Ether staking to propose a block. |
+| $C_{ref-depth}$ | 128 | Recent $C_{ref-depth}$ UTXO tree roots are available to be used for the UTXO Merkle proof reference. |
+
+Its solidity form looks like:
+```solidity
+contract Config {
+    uint256 public constant UTXO_TREE_DEPTH = 48;
+    uint256 public constant MAX_UTXO = (1 << UTXO_TREE_DEPTH);
+    uint256 public constant WITHDRAWAL_TREE_DEPTH = 48;
+    uint256 public constant MAX_WITHDRAWAL = (1 << WITHDRAWAL_TREE_DEPTH);
+    uint256 public constant NULLIFIER_TREE_DEPTH = 254;
+
+    uint256 public constant UTXO_SUB_TREE_DEPTH = 5; // 32 items at once
+    uint256 public constant UTXO_SUB_TREE_SIZE = 1 << UTXO_SUB_TREE_DEPTH;
+    uint256 public constant WITHDRAWAL_SUB_TREE_DEPTH = 5; // 32 items at once
+    uint256 public constant WITHDRAWAL_SUB_TREE_SIZE =
+        1 << WITHDRAWAL_SUB_TREE_DEPTH;
+
+    uint256 public MAX_BLOCK_SIZE = 200000; // 3.2M gas for calldata
+    uint256 public MAX_VALIDATION_GAS = 6000000; // 6M gas
+    // 46523 blocks when the challenge period is 7 days and average block time is 13 sec
+    uint256 public CHALLENGE_PERIOD = 46523;
+    uint256 public MINIMUM_STAKE = 32 ether;
+    uint256 public REF_DEPTH = 128;
+}
+```
 
-#### [3.4.2]
-$\Sigma_{i = 1}^{m}asset_{eth}({U}_i) = \Sigma_{j = 1}^n asset_{eth}({O}_j) + \Sigma_{j = 1}^n data_{fee}({O}_j) + f$ where $f$ is the layer-2 transaction fee.
+### 4.2 Deposit
 
-#### [3.4.3]
-Let $\mathbb{U} = [U_1, ..., U_m]$, and $\mathbb{O} = [O_1, ..., O_n]$.
-For every $addr \in (asset_{token}(\mathbb{U}) \cup asset_{token}(\mathbb{O}))$,
-$\Sigma_{i = 1}^{m}asset_{erc20}({U}_i)\cdot filter(addr, asset_{token}({U}_i)) = \Sigma_{j = 1}^{n}asset_{erc20}({O}_j)\cdot filter(addr, asset_{token}({O}_j))$
+#### [4.2.1] - Struct Definition
 
-#### [3.4.4]
+Let $\mathsf{Tree_\mathsf{utxo}}$ be defined in [5.3.1].
 
-For every $addr \in (asset_{token}(\mathbb{U}) \cup asset_{token}(\mathbb{O}))$ and every $nft \in (asset_{nft}(\mathbb{U}) \cup asset_{nft}(\mathbb{O}))$, 
+Let's define deposit $\mathrm{D} = (\mathrm{U}, f)$ where $f$ is fee for the block proposer and $\mathrm{U}$ is the UTXO that'll be included in $\mathsf{Tree_\mathsf{utxo}}$ later.
 
-$\Sigma_{i = 1}^{m} filter(asset_{nft}({U}_i), nft)\cdot filter(addr, asset_{token}({U}_i)) \\
-= \Sigma_{j = 1}^{n} filter(asset_{nft}({O}_j), nft)\cdot filter(addr, asset_{token}({O}_j)) \\
-= existence \in {0, 1}$
+#### [4.2.2] - Mass Deposit
 
+#### [4.2.2.1] - Merging Leaves
 
-## 4. Deposit
+Let's define $keccak256_2$ as
+$keccak256_2(a, b) = keccak256(c)$
+Where $c$ is a 64 bytes data which is the concatenation of two 32 bytes numbers $a$ and $b$ with big-endian.
 
-#### [4.1]
+Zkopru does not store the deposit notes on the contract to minimize the storage gas cost. Instead of storing the deposit notes, it only stores the merged value of all deposits in one storage slot. It could also use a Merkle tree but sequential merging is much gas efficient.
 
-Let's define deposit ${D} = \{{U}, f\}$ where ${U}$ is a UTXO and $f$ is fee for block proposer.
+So, let's say we have an array of hashes like $[h_1, h_2, ..., h_n]$.
 
-#### [4.2]
+where 
+$\mathsf{merge}([]) = 0$
+$\mathsf{merge}([h1]) = keccak256_2(0, h_1)$
+$\mathsf{merge}([h_1, h_2]) = keccak256_2(h_1, h_2)$
+$\mathsf{merge}([h_1, h_2, h_3]) = keccak256_2(\mathsf{merge}([h_1, h_2]), h_3)$
+$\mathsf{merge}([h_1, h_2, ..., h_n])
+= keccak256_2(\mathsf{merge}([h_1, h_2, ..., h_{n-1}]), h_{n})$
 
-$\{asset_{eth}({U}), asset_{token}({U}), asset_{erc20}({U}), asset_{nft}({U}), S({U}), salt({U})\}$ is revealed via layer-1 transaction calldata and used to compute the deposit hash $h = h({U})$.
+So we can express this $\mathsf{merge}$ function as an recursive form like,
 
-#### [4.3]
+$$
+\mathsf{merge}([h_1, h_2, ..., h_n])
+= \mathsf{merge}([\mathsf{merge}([h_1, h_2, ..., h_{n-1}]), h_{n}])
+$$
 
-$[{D}_1, ..., {D}_n]$ constructs a mass deposit ${MD}$.
+#### [4.2.2.2] - Staged Deposits
 
-#### [4.4]
-Let $merge$ be as defined in [[11.1]](#11.1). Then mass deposit ${MD} = \{merge^{keccak256}([h_1, h_2, ..., h_n]), \Sigma^n_{i=1} f_i \}$ where $h_i = h({U}_i)$ and ${D}_i = \{{U}_i, f_i\}$
-#### [4.4]
+Smart contract has one staged deposits that can be a Mass Deposit. Every `deposit()` function will update the staged deposits and will merge the deposit data into it.
 
-A deposit ${D}$ should transfer defined assets from the message sender to the Zkopru contract and update the latest ${MM}$.
+Here is how a deposit $\mathrm{D}$ by `deposit()` updates the staged deposits $\mathrm{MD}_{stage}$.
 
-#### [4.5]
+Let $[\mathrm{D_1},\mathrm{D_2}, ...,\mathrm{D_n}]$ are appended to the staged deposits.
+Let $\mathsf{merge()}$ be defined in [4.2.2.1].
+Let $f_i$ is the deposit fee for $\mathrm{D}_i$.
 
-Deposits can be merged only into the latest mass deposit.
+Then,
 
-#### [4.6]
+$$
+\mathrm{MD}_{stage} = (\mathsf{merged}, f_{MD})
+$$
 
-Mass deposit should be frozen to be included in the layer-2 blocks.
+where 
 
+$$
+\mathsf{merged} = \mathsf{merge}([\mathsf{hash}(\mathrm{D_1}), \mathsf{hash}(\mathrm{D_2}), ..., \mathsf{hash}(\mathrm{D_n})]) \\
+f_{MD} = \Sigma_{i=0}^{n} f_i
+$$
 
-## 5. Withdrawal
+Finally, the `deposit()` transaction transfers assets and stores the updated $\mathrm{MD}_{stage}$ to `Zkopru.chain.stagedDeposits`.
 
-#### [5.1]
-A withdrawal ${W} = \{{U}, f\}$ where ${U}$ is a UTXO to withdraw out to the layer 1 and $f$ is the fee for pre-payer for the instant withdrawal.
+#### [4.2.2.3] - Commitment of Mass Deposit
 
-#### [5.2]
-When ${W} = \{{U}, f\}$, ${U}$ should be created by a transaction that has output type $t({U})=1$ as defined in [[3.3.9]](#3.3.9).
+Anyone can commit the staged deposits and create a Mass Deposit from it by calling `commitMassDeposit()`. Then, the layer 1 contract records it as committed and starts a new empty staged deposit object.
 
-#### [5.3]
 
-$\{asset_{eth}({U}), asset_{token}({U}), asset_{erc20}({U}), asset_{nft}({U}), S({U}), salt({U})\}$ is public data as defined in [[3.3.7]](#3.3.7).
+Let $[\mathrm{D_1},\mathrm{D_2}, ...,\mathrm{D_n}]$ construct a mass deposit $\mathrm{MD}$.
 
-#### [5.4]
+Then, the mass deposit $\mathrm{MD}$ is expressed with
+$$
+\mathrm{MD} = (\mathsf{merged}_\mathrm{MD}, f_\mathrm{MD})
+$$
 
-Withdrawals $[{W}_1, ..., {W}_n]$
+where
 
+$$
+\mathsf{merged}_\mathrm{MD} = \mathsf{merge}([\mathsf{hash}(\mathrm{D_1}), \mathsf{hash}(\mathrm{D_2}), ..., \mathsf{hash}(\mathrm{D_n})])
+$$
 
-Let a mass migration ${MM} = \{dest, asset, {MD}\}$, then $[{M_1}, ..., {M_n}]$ then $dest({MM}) = dest({M_i}) = dest({M_j})$ where $(i, j) \in [1, ..., n]$.
+Finally, `commitMassDeposit()` stores $\mathrm{MD}$ to the `Zkopru.chain.committedDeposits` setting the key with its hash value.
 
+The hash of a mass deposit is
+$$
+\mathsf{hash}(\mathrm{MD}) = keccak256(\mathsf{encodePacked}(\mathsf{merged}_\mathrm{MD}, f_\mathrm{MD})).
+$$
 
-#### [5.5]
+### 4.3 Withdrawal
 
-If a block includes mass migrations $[{MM_1}, ..., {MM_n}]$, $dest({MM_i}) \neq dest({MM_j})$ where $(i, j) \in [1, ..., n]$
+To withdraw $\mathrm{W}$ out of the Zkopru network, there should be an existence proof and the ownership proof.
 
+#### 4.3.1. Withdrawal Note Existence Proof
 
-#### [5.6]
+#### [4.3.1.1] - Withdrawal Note Position
 
-Every migration output becomes a new deposit for its destination network and the set of migration that has same $dest$ address becomes the mass deposit for its destination network. Therefore, a mass migration ${MM} = \{dest, asset, {MD}\}$ has $dest$, the address of destination network, $asset$, the total amount of asset including Ether, ERC20 and NFTs, and ${MD}$.
+Let $\mathcal{W}$ be defined in [3.1.3].
+Let $\mathsf{Tree_\mathsf{withdrawal}}$ be defined in [5.3.2].
 
-#### [5.7]
+$\mathsf{pos}(\mathcal{W})$ is the leaf index of $\mathcal{W}$ in the Withdrawal Merkle tree $\mathsf{Tree}_\mathsf{withdrawal}$.
 
-$asset=\{asset_{eth}({MD}), [\{addr_1, amount_1\},...,\{addr_m, amount_m\}], [\{addr_1, [nft^{(1)}_1, ..., nft^{(1)}_{k_1}]\},...,\{addr_n, [nft^{(n)}_1, ..., nft^{(n)}_{k_n}]\}] \}$ should have exactly same amount of the sum of all ${U}$s that are included in the ${MD}$ of the mass migration.
+#### [4.3.1.2] - Merkle Proof of Withdrawal Note
 
+Let $\mathsf{hash}(\mathcal{W})$ be defined in [3.1.3].
+Let $\mathsf{pos}(\mathcal{W})$ be defined in [4.3.1.1].
+Let $\mathsf{Tree_\mathsf{withdrawal}}$ be defined in [5.3.2].
+Let $\mathsf{root_{withdrawal}}^{(n)}$ be defined in [6.1.2].
 
-## 6. Migration
+Let the root of $\mathsf{Tree}_\mathsf{withdrawal}$ at the $n$-th layer 2 block be denoted $\mathsf{root_{withdrawal}}^{(n)}$.
+$\mathsf{Sib}_\mathsf{withdrawal}^{(n)}(\mathcal{W})$ is the set of all sibling node data of Withdrawal $\mathcal{W}$ at the $n$-th layer 2 block.
 
-#### [6.1]
+Then the block $\mathsf{Block}^{(n)}$ and its corresponding $\mathsf{root_{withdrawal}}^{(n)}$ should be recorded as finalized on the smart contract by the optimistic rollup consensus.
 
-A migration ${M} = \{{U}, f, dest\}$ where ${U}$ is a UTXO to be used in destination network and $f$ is fee for the block proposer of the destination network and $dest$ is the contract address of the destination network.
+Then, `withdraw()` transaction should include a Merkle Proof that proves
+$$
+\mathsf{Merkle}^{(n)}_\mathsf{withdrawal}(\mathcal{W}) = (\mathsf{hash}(\mathcal{W}), \mathsf{pos}(\mathcal{W}), \mathsf{root_{withdrawal}}^{(n)}, \mathsf{Sib}_\mathcal{W}^{(n)}(\mathcal{W}))
+$$
 
-#### [6.2]
-When ${M} = \{{U}, f, dest\}$, ${U}$ should be created by a transaction that has output type $t({U})=2$ as defined in [[3.3.10]](#3.3.10).
+#### [4.3.1.3] - Caller Fee
 
-#### [6.3]
+Let $\mathsf{N}, \mathcal{N}$ be defined in [3.1.1]
+Let $\mathcal{W}$ be defined in [3.1.3]
 
-$\{asset_{eth}({U}), asset_{token}({U}), asset_{erc20}({U}), asset_{nft}({U}), S({U}), salt({U})\}$ is public data as defined in [[3.3.7]](#3.3.7).
+Layer 1 transaction `withdraw()` should include $\mathsf{hash(N)}$ and $\mathcal{N}$ that satisfy $\mathsf{hash(\mathcal{W})}$.
 
+Then, the submitted $\mathsf{fee_{caller}}$ amount of Ether goes to the `withdraw()` transaction executor.
 
-#### [6.4]
+#### [4.3.1.4] - Pay In Advance
 
-$[{M_1}, ..., {M_n}]$ constructs a mass migration ${MM}$
+As the user should wait the finalization, $\mathcal{W}$ owner can request an instant withdrawal to prepayers who are willing to pay the fund in advance to earn fee.
 
-#### [6.5]
+For the instant withdrawal with pay in advance feature,
 
-${MM} = \{dest, asset, {MD}^{'}\}$ where $dest$ is the address of the destination network and ${MD}^{'}$ becomes the mass deposit for the destination network. ${MM}$ should transfer $asset$ from Zkopru contract to the $dest$ contract when it is finalized by the block finalization logic.
-#### [6.6]
+1. $\mathcal{W}$ owner select a prepayer and generate a message that
+    $$
+	\mathsf{msg_{prepay}} = keccak256(\mathsf{encodePacked}([\mathsf{addr_{prepayer}}, \mathsf{hash}(\mathcal{W}), f_{erc20}, f_{ether}]))
+	$$
+   Since the $\mathcal{W}$ might be a ERC20 only withdrawal note, the owner can choose how to pay the fee for instant withdrawal to the prepayer.
+2. Generate a ECDSA with the correct account which address is $\mathcal{N}.\mathsf{to}$ and send a request to the prepayer using a communication channels like HTTP.
+3. If the request look profitable, the prepayer verifies the validity calls the `payInAdvance()` function wwith the received ECDSA signature and correct amount of assets to pay in advance for the original owner.
+4. Smart contract verifies the relationship between $\mathsf{hash(\mathcal{W})}$, ECDSA, and the transaction signer. If it passes all verifications, it records the transferred ownership of the $\mathcal{W}$ and it transfers assets to the original owner.
 
-Let $merge$ be as defined in [[11.1]](#11.1). Then, ${MD}^{'} = \{merge^{keccak256}([h_1, h_2, ..., h_n]), \Sigma^n_{i=1} f_i \}$  where $h_i = h({U}_i), {M}_i = \{{U}_i, f_i\}$
+### 4.4 Migration
 
-#### [6.7]
+#### [4.4.1] Mass Migration Construction
 
-$dest = dest({M_i}) = dest({M_j})$ where $(i, j) \in [1, ..., n]$.
+Let $\mathcal{M}$ be defined in [3.1.4]
+Let $M$ be the set of all migration type transaction outputs of a block.
+Let $A_\mathsf{dest}$ be the set of all destination addresses of the migration type transaction outputs of the block.
+Let $A_\mathsf{erc20}$ be the set of all ERC20 addresses that exist in the migration outputs.
+Let $A_\mathsf{erc721}$ be the set of all ERC721 addresses that exist in the migration outputs.
+Let $\mathsf{merge()}$ be defined in [4.2.2.1]
 
+Then, for each $\mathsf{dest} \in A_\mathsf{dest}$, we can construct a set of migrations with
+$M_{\mathsf{dest}} =\{ \mathcal{M} | \mathcal{M}.\mathsf{to} = \mathsf{dest}\} = \{\mathcal{M_1, M_2, ..., M_k}\}$
 
-#### [6.8]
+Let $ftr$ be defined in [3.2.4.6.2]
 
-If a block includes mass migrations $[{MM_1}, ..., {MM_n}]$, $dest({MM_i}) \neq dest({MM_j})$ where $(i, j) \in [1, ..., n]$
+Then, for each $\mathsf{dest} \in A_\mathsf{dest}$, corresponding mass migration $\mathrm{MM}$ is defined as
 
-#### [6.9]
+$\mathrm{MM} = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$
 
-$asset_{eth}(MM) = \Sigma_{i = 0}^{n}eth(M)$
-$asset^{(tokenA)}_{erc20}(MM) = \Sigma_{i = 0}^{n}tokenA(M)$
-$asset^{(tokenB)}_{erc721}(MM) = [nft_1, ..., nft_k]$
-==need more detail explanations==
+where
+* $\mathsf{v_{eth}} = \Sigma_{i=0}^{k} \mathcal{M}_i.\mathsf{v_{eth}}$
+* $\mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})$
+* $\mathsf{migration_{erc20}} = \{ (\mathsf{addr}, \mathsf{amount}) | \mathsf{addr} \in A_\mathsf{erc20} \text{, } \mathsf{amount} = \Sigma_{i=1}^k \mathcal{M_i}.\mathsf{v_{erc20}}\cdot ftr(\mathcal{M_i.\mathsf{addr_{token}}}, \mathsf{addr})\}$
+* $\mathsf{migration_{erc721}} = \{ (\mathsf{addr}, \mathsf{nfts}) | \mathsf{addr} \in A_\mathsf{erc721} \text{, } \mathsf{nfts} = \{\mathcal{M}.\mathsf{v_{nft}} | \mathcal{M}\in \mathrm{M}_\mathsf{dest}\text{, }\mathcal{M}.\mathsf{v_{nft}} \neq 0 \}\}$
 
-## 7. Tree
+#### [4.4.2] Destination
 
-### 7.1 Constants
+Let a block contain mass migrations $[\mathrm{MM}_1, ..., \mathrm{MM}_n]$
 
-#### [7.1.1] 
+Then $\mathrm{MM}_i.\mathsf{dest} \neq \mathrm{MM}_j.\mathsf{dest}$ when $i \neq j$ and $i,j \in A_\mathsf{dest}$
 
-$C_{utxo-tree-depth}$, $C_{nullifier-tree-depth}$, and $C_{withdrawal-tree-depth}$ are constants and written on the smart contract.
+#### [4.4.3] Accept migrations & `migrateTo`
 
-#### [7.1.2] 
+Zkopru can have and manage an allow list of migrant contracts. Once the source address of a mass migration is in the allow list, anyone can execute the `migrateTo()` function to the source contract to trasnfer assets and create a mass deposit for the assets.
 
-$C_{utxo-subtree-depth}$ and $C_{withdrawal-subtree-depth}$ are constants and written on the smart contract.
+Then, $\mathsf{dest}$ network adds the given $\mathrm{MD}$ to `Zkopru(dest).chain.committedDeposits`.
 
-### 7.2 Sparse Merkle Tree
+### 4.5 Proposal & Finalization
 
-#### [7.2.1]
+#### [4.5.1] Getting Proposal Rights
 
-Let $(root_{next}, index_{next}, siblings_{next}) = smtAppend(h, root_{prev}, index_{prev}, siblings_{prev}, leaf)$ where
-$h$: hash function to calculate branch node.
-$root$: The root node value of the tree.
-$index$: The starting index to start appending leaves.
-$leaf$: An item to append to the tree.
+Zkopru can have various types of proposer selection logic. And it can be simply fetched by calling `isProposable(address)` function which type is
+```solidity
+function isProposable(address proposer) pure returns (bool);
+```
 
-#### [7.2.2]
+This function asks the proposability of the given address to the `ConsensusProvider` which default is the "BurnAuction" for now.
 
-Then, $merkleProof(h, index_{prev}, 0, siblings_{prev}, root_{prev}) = 1$
+#### [4.5.2] Stake
 
-#### [7.2.3]
+To propose a block, the coordinator should have staked more than 32 ETH in the contract. Coordinator can stake ETH by calling `register()`.
 
-$merkleProof(h, index_{prev}, leaf, siblings_{prev}, root_{next}) = 1$
+#### [4.5.3] Propose
 
-#### [7.2.4]
+Let $C_{max-block-size}$ be defined in [4.1.2].
 
-$merkleProof(h, index + 1, 0, siblings_{next}, root_{next}) = 1$
+Once the coordinator has proposer amount of stakes, proposer can submit a serialized form of $\mathtt{Block}$ as defined in [6.7.1] by calling `propose(bytes calldata)` function.
 
-### 7.3 Batch append
+To call the function `propose()`, it requires
+* The `msg.sender` should have staked more than 32 ETH.
+* $len(\mathtt{Block}^{(n)}) < C_{max-block-size}$.
+* $\mathsf{Block}^{(n)}.\mathsf{proposer}$ equals to the `msg.sender`.
+* There is no duplicated proposal that has same block proposal checksum which is defined in [6.7.2].
 
-Let $(root_{next}, index_{next}, siblings_{next}) = smtBatchAppend(h, root_{prev}, index_{prev}, siblings_{prev}, leaves)$where
-$h$: hash function to calculate branch node.
-$root_{prev}$: The root node value of the tree.
-$index_{prev}$: The starting index to start appending leaves.
-$leaves$: $[leaf_1, ..., leaf_n]$
+Once the function `propose()` is called, 
 
+* It records the block hash by chaining with its parent hash value.
+* It saves the proposal checksum for its future challenge.
+* It records the utxo root for the utxo inclusion proof reference.
+* It records the withdrawal root for the withdrawal proof of [4.3.1.2].
+* It extends the `Zkopru.chain.proposers.exitAllowance` to its challenge due block number that is `block.number` +$C_{challenge-preiod}$.
+* And commit the latest staged deposits.
 
-#### [7.3.1]
+#### [4.5.4] Exit
 
-Let $smtAppend$ be defined in [[7.2.1]](#7.2.1). Then,
-$(root_{i+1}, index_{i+1}, siblings_{i+1}) = smtAppend(h, root_{i}, index_{i}, siblings_{i}, leaf_{i})$  where $root_1 = root_{prev}$ and $root_{n+1} = root_{next}$.
+Coordinators can withdraw their staked ETH whenever `Zkopru.chain.proposers.exitAllowance` is behind the block number.
 
-For $i \in [1, ..., n]$
+#### [4.5.5] Finalization
 
-#### [7.3.2]
+Let $\mathtt{Finalization}^{(n)}$ be defined in [6.7.2].
 
-$merkleRoot(h, index_{i}, 0, siblings_{i}) = root_{i}$
+Anyone can call the `finalize(bytes calldata)` function by submitting the finalization data $\mathtt{Finalization}^{(n)}$.
 
-#### [7.3.3]
+Using the $\mathsf{checksum}$ of the proposal parsed from $\mathtt{Finalization}^{(n)}$ retrieve the proposal object `proposal` from `Zkopru.chain.proposals[checksum]`.
 
-$merkleRoot(h, index_{i}, leaf_{i}, siblings_{i}) = root_{i+1}$
+To finalize a block, it requires
 
-#### [7.3.4]
+* $\mathsf{depositRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MDs}^{(n)}$.
+* $\mathsf{migrationRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MMs}^{(n)}$.
+* $\mathsf{migrationRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MMs}^{(n)}$.
+* $\mathsf{hash}(\mathsf{Header}^{(n)})$ should equal to the stored hash in `proposal`.
+* `proposal` should not be slashed.
+* `proposal` should not be finalized.
+* `Zkopru.chain.latest` should equal to the $\mathsf{parent}$ of $\mathsf{Header}^{(n)}$.
+* `proposal.challengeDue` should be behind `block.number`.
+* Every $\mathtt{MD}$ should be committed in the `Zkopru.chain.committedDeposits`.
+* Every $\mathtt{MM}$ should not exist in the `Zkopru.chain.migrations`.
 
-$merkleRoot(h, index_{i+1}, 0, siblings_{i+1}) = root_{i+1}$
+Once the function `finalize()` is called, 
+* It removes the every $\mathtt{MD}$ from `Zkopru.chain.committedDeposits`.
+* It marks all $\mathtt{MM}$ as true in `Zkopru.chain.migrations`. It allows `migrateTo()` function call in [4.4.3].
+* It gives the $\mathsf{fee}^{(n)}$ to the proposer.
+* It marks the block header hash as finalized in `Zkopru.chain.finalized`
+* It marks the utxo root as finalized in `Zkopru.chain.finalizedUTXORoots`
+* It updates the latest block hash `latest`.
+* It deletes `proposal`.
 
-### 7.4 Sub tree append
+### 4.6 Token Registration
 
-Let a tree has $d_{SMT}$ for its depth and $d_{sub}$ for its subtree's depth. And Let $(root_{next}, index_{next}, siblings_{next}) = smtSubtreeAppend(h, root_{prev}, index_{prev}, siblings_{prev}, leaves)$.
+#### [4.6.1] Token Id
 
-#### [7.4.1]
+Zkopru transaction's encrypted memo field uses token id instead of its full address to reduce the data size.
 
-$d_{sub} < d^{SMT}$
+If the token address is $a$, $\mathsf{tokenId(a)} = a \ mod \ 256$.
 
-#### [7.4.2]
+#### [4.6.2] ERC20 Token Registration
 
-Let $leaves = [item_1, ..., item_n] = [[sub^{(1)}_1, ..., sub^{(1)}_{n_1}], [sub^{(2)}_1, ..., sub^{(2)}_{n_2}], ..., [sub^{(k)}_1, ..., sub^{(k)}_{n_k}]]$, then 
+Anyone can register any kind of ERC20 Token that follows the standard interface. Once the testing transaction is succeed, Zkopru contract will register the token address into the `Zkopru.chain.registeredERC20s`.
 
+#### [4.6.3] ERC721 Token Registration
+
+Anyone also can register any kind of ERC721 Token that implements ERC165 standard. If the token contract's ERC165 interface returns true against the query for ERC721 support, Zkopru contract will register the token address into the `Zkopru.chain.registeredERC721s`.
+
+### 4.7 Validations
+
+Let's assume that a proposer submitted $\mathsf{Block}^{(n)}$.
+
+#### [4.7.1] Deposit Validation - D1: Mass Deposit is not Committed
+
+Let $\mathrm{MD}$ is one of the submitted mass deposit in $\mathsf{Block}^{(n)}$.
+
+Then, if any of the $\mathsf{hash}(\mathrm{MD})$ does not exists in `Zkopru.chain.committedDeposits`, the validation contract returns `slashable = true` with code D1.
+
+#### [4.7.2.1] Header Validation - H1: Deposit Root
+
+Let $\mathsf{MerkleRoot}$ be defined in [7.1]
+Let $\mathtt{MDs}$ is the array of submitted mass deposits in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{depositRoot}^{(n)}$ be defined in [6.2.1]
+
+When $\mathsf{MerkleRoot}_{keccak256}(\mathtt{MDs})$ does not equal to $\mathsf{depositRoot}^{(n)}$, the validation contract returns `slashable = true` with code H1.
+
+#### [4.7.2.2] Header Validation - H2: Transaction Root
+
+Let $\mathsf{MerkleRoot}$ be defined in [7.1]
+Let $\mathtt{TXs}$ is the array of submitted transactions in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{txRoot}^{(n)}$ be defined in [6.2.1]
+
+When $\mathsf{MerkleRoot}_{keccak256}(\mathtt{TXs})$ does not equal to $\mathsf{txRoot}^{(n)}$, the validation contract returns `slashable = true` with code H2.
+
+#### [4.7.2.3] Header Validation - H3: Migration Root
+
+Let $\mathsf{MerkleRoot}$ be defined in [7.1]
+Let $\mathtt{MMs}$ is the array of submitted mass migrations in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{migrationRoot}^{(n)}$ be defined in [6.2.1]
+
+When $\mathsf{MerkleRoot}_{keccak256}(\mathtt{MMs})$ does not equal to $\mathsf{migrationRoot}^{(n)}$, the validation contract returns `slashable = true` with code H3.
+
+
+#### [4.7.2.4] Header Validation - H4: Total Fee
+
+The total fee for block proposer should equal to
+
+$$
+\mathsf{fee}^{(n)} = \Sigma_{i=0}^{n_{tx}} \mathcal{Tx}_i.\mathcal{P}.f + \Sigma_{i=0}^{n_{md}} \mathrm{MD}_i.f_{MD}
+$$
+
+Or validation contract returns `slashable = true` with code H4.
+
+#### [4.7.2.5] Header Validation - H5: Parent Block
+
+Then, $\mathsf{parent}^{(n)}$ should not be a slashed block. So if `Zkopru.chain.slashed[parent]` exists, the validation contract returns `slashable = true` with code H5.
+
+#### [4.7.3.1] Migration Validation - M1: Duplicated MassMigration
+
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+
+If it does not satisfy the condition [4.4.2] that every migration should have different destination, the validation contract returns `slashable = true` with code M1.
+
+#### [4.7.3.2] Migration Validation - M2: Migration ETH Amount
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+
+If it does not satisfy the total ETH condition in [4.4.1]
+$$
+\mathsf{v_{eth}} = \Sigma_{i=0}^{k} \mathcal{M}_i.\mathsf{v_{eth}}
+$$
+
+the validation contract returns `slashable = true` with code M2.
+
+#### [4.7.3.3] Migration Validation - M3: Merged Leaves
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+
+If it does not satisfy the $\mathsf{merge}$ condition in [4.4.1]
+$$
+\mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})
+$$
+
+the validation contract returns `slashable = true` with code M3.
+
+#### [4.7.3.4] Migration Validation - M4: Migration Fee
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+
+If it does not satisfy the $\mathsf{fee}$ condition in [4.4.1]
+$$
+\mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})
+$$
+
+the validation contract returns `slashable = true` with code M4.
+
+#### [4.7.3.5] Migration Validation - M5: Duplicated ERC20 Migration
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{migration_{erc20}} = [\mathsf{m_{erc20}}_1, ..., \mathsf{m_{erc20}}_n]$.
+
+If $\mathsf{m_{erc20}}_i.\mathsf{addr} = \mathsf{m_{erc20}}_j.\mathsf{addr}$ and $i \neq j$, then
+the validation contract returns `slashable = true` with code M5.
+
+#### [4.7.3.6] Migration Validation - M6: ERC20 Migration Amount
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{migration_{erc20}} = [\mathsf{m_{erc20}}_1, ..., \mathsf{m_{erc20}}_n]$.
+
+Then, for $1 \leq i\leq n$, if it does not satisfy the following condition:
+
+$\mathsf{m_{erc20}}_i.\mathsf{amount} = \Sigma_{j=1}^k \mathcal{M_i}.\mathsf{v_{erc20}}\cdot ftr(\mathcal{M_j.\mathsf{addr_{token}}}, \mathsf{m_{erc20}}_i.\mathsf{addr})\}$
+where $\mathcal{M_j} \in \mathcal{M}_\mathsf{dest}$ as defined in [4.4.1].
+
+the validation contract returns `slashable = true` with code M6.
+
+#### [4.7.3.7] Migration Validation - M7: Duplicated ERC721 Migration
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{migration_{erc721}} = [\mathsf{m_{erc721}}_1, ..., \mathsf{m_{erc721}}_n]$.
+
+If $\mathsf{m_{erc721}}_i.\mathsf{addr} = \mathsf{m_{erc721}}_j.\mathsf{addr}$ and $i \neq j$, then
+the validation contract returns `slashable = true` with code M7.
+
+#### [4.7.3.8] Migration Validation - M8: ERC721 Duplicated NFTs
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+Let $\mathsf{migration_{erc721}} = [\mathsf{m_{erc721}}_1, ..., \mathsf{m_{erc721}}_n]$.
+
+Then, for every $1 \leq i\leq n$, if there exists duplicated NFT ids, the validation contract returns `slashable = true` with code M8.
+
+#### [4.7.3.9] Migration Validation - M9: Missing NFT
+
+For every $\mathcal{Tx}$, if the migration output NFT does not exists in the mass migration object, the validation contract returns `slashable = true` with code M9.
+
+#### [4.7.3.10] Migration Validation - M10: Missing Migration
+
+For every $\mathcal{Tx}$, if the migration destination does not exists in the mass migration list, the validation contract returns `slashable = true` with code M10.
+
+#### [4.7.4] Nullifier Validation - N1: Nullifier root is not correct
+
+Let $\mathtt{TXs}^{(n)}$ and $\mathtt{Tx}^{(n)}_i$ be defined in [6.6.5]
+Let $\mathcal{Tx}^{(n)}_i$ be the deserialized form of $\mathtt{TX}^{(n)}_i$.
+Let $\mathsf{Tree_{nullifier}}^{(n)}$ be defined in [5.3.3].
+
+Let $\mathsf{nullifiers}^{(n)} = \{\mathcal{Tx_i^{(n)}.P.In_j.\mathsf{nullifier}} | 1 \leq i \leq n_{tx},  1 \leq j \leq 4 \}$
+
+Then, for every $\mathsf{nullifier} \in \mathsf{nullifiers}^{(n)}$, should not exist in the $\mathsf{Tree}_{nullifier}$.
+
+And appending all $\mathsf{nullifier}$ to $\mathsf{Tree_{nullifier}}^{(n-1)}$, its updated root should equal to  $\mathsf{root}^{(n)}_\mathsf{nullifier}$.
+
+Otherwise, the validation contract returns `slashable = true` with code N1.
+
+#### [4.7.5] Utxo Tree Validation
+
+Let $\mathtt{TXs}^{(n)}$ and $\mathtt{Tx}^{(n)}_i$ be defined in [6.6.5]
+Let $\mathtt{MDs}^{(n)}$ and $\mathrm{MD}^{(n)}_i$ be defined in [6.6.5]
+Let $\mathsf{Tree_{utxo}}^{(n)}$ be defined in [5.3.3].
+Let $C_{utxo-sub-tree-size}$ be defined in [4.1.2].
+
+Let $\mathrm{MD}^{(n)}_i = [\mathrm{D}_{i_1}, \mathrm{D}_{i_2}, ..., \mathrm{D}_{i_{n_i}}]$.
+
+Then the list of deposit notes becomes $\mathsf{utxos}_{deposits}^{(n)} = [\underbrace{\mathrm{D}_{1_1}, \mathrm{D}_{1_2}, ..., \mathrm{D}_{1_{n_1}}}_{\mathrm{MD}_1}, \underbrace{\mathrm{D}_{2_1}, \mathrm{D}_{2_2}, ..., \mathrm{D}_{2_{n_2}}}_{\mathrm{MD}_2}, ..., \underbrace{\mathrm{D}_{k_1}, \mathrm{D}_{k_2}, ..., \mathrm{D}_{k_{n_k}}}_{\mathrm{MD}_{n_{md}=k}}]$
+
+Let $\mathrm{U}_{i_j} = \mathcal{Tx_i^{(n)}.P.Out_j}$.
+
+Then the list of deposit notes becomes $\mathsf{utxos}_{txs}^{(n)} = [\underbrace{\mathrm{O}_{1_1}, \mathrm{O}_{1_2}, ..., \mathrm{O}_{1_{n_1}}}_{\mathcal{Tx}_1}, \underbrace{\mathrm{O}_{2_1}, \mathrm{O}_{2_2}, ..., \mathrm{O}_{2_{n_2}}}_{\mathcal{Tx}_2}, ..., \underbrace{\mathrm{O}_{l_1}, \mathrm{O}_{l_2}, ..., \mathrm{O}_{l_{n_l}}}_{\mathcal{Tx}_{n_{tx} = l}}]$
+
+Then the total list of all utxos becomes
+
+$$
+\mathsf{utxos}^{(n)} = [\underbrace{\mathrm{D}_{1_1}, \mathrm{D}_{1_2}, ..., \mathrm{D}_{k_{n_k}}}_{\mathsf{utxos}^{(n)}_{deposits}}, \underbrace{\mathrm{O}_{1_1}, \mathrm{O}_{1_2}, ..., \mathrm{O}_{l_{n_l}}}_{\mathsf{utxos}^{(n)}_{txs}}, \underbrace{0, 0, ..., 0}_\text{padded zeroes}]
+$$
+
+Here, the padded zeroes are added to make the length of $\mathsf{utxos}^{(n)}$ be the multiple of $C_{utxo-sub-tree-size}$.
+
+Therefore
+$$
+len(\mathsf{utxos}^{(n)}) \ mod \ C_{utxo-sub-tree-size} = 0
+$$
+
+#### [4.7.5.1] UTXO Tree Validation - U1: Index Validation
+
+Let $\mathsf{utxos}^{(n)}$ be defined in [4.7.5].
+Let $\mathsf{index_{utxos}}^{(n)}$ be defined in [6.2.1].
+
+Then,
+$$
+len(\mathsf{utxos}^{(n)}) + \mathsf{index_{utxos}}^{(n-1)} = \mathsf{index_{utxos}}^{(n)}
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code U1.
+
+#### [4.7.5.2] UTXO Tree Validation - U2: Max UTXOs
+
+Let $\mathsf{utxos}^{(n)}$ be defined in [4.7.5].
+Let $\mathsf{index_{utxo}}^{(n)}$ be defined in [6.2.1].
+Let $C_{max-utxo}$ be defined in [4.1.2].
+
+Then,
+$$
+len(\mathsf{utxos}^{(n)}) + \mathsf{index_{utxos}}^{(n-1)} \leq C_{max-utxo}
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code U2.
+
+#### [4.7.5.3] UTXO Tree Validation - U3: UTXO Tree Root
+
+Let $\mathsf{Tree_{utxo}}^{(n)}$ be defined in [5.3.1].
+Let $\mathsf{utxos}^{(n)}$ be defined in [4.7.5].
+Let $\mathsf{root_{utxo}}^{(n)}$ be defined in [6.2.1].
+Let $C_{max-utxo}$ be defined in [4.1.2].
+
+Then, appending the hash of each items in $\mathsf{utxos}^{(n)}$ to $\mathsf{Tree_{utxo}}^{(n-1)}$ should have an updated root that equals to $\mathsf{root_{utxo}}^{(n)}$.
+
+Otherwise, the validation contract returns `slashable = true` with code U3.
+
+#### [4.7.6] Withdrawal Tree Validation
+
+Let $\mathtt{TXs}^{(n)}$ and $\mathtt{Tx}^{(n)}_i$ be defined in [6.6.5]
+Let $\mathsf{Tree_{withdrawal}}^{(n)}$ be defined in [5.3.2].
+Let $C_{withdrawal-sub-tree-size}$ be defined in [4.1.2].
+
+Let $\mathcal{W}_{i_j} = \mathcal{Tx_i^{(n)}.P.Out_j}$ only if $\mathcal{Tx_i^{(n)}.P.Out_j}.t = 1$.
+
+Then the list of deposit notes becomes $\mathsf{withdrawals}^{(n)} = [\underbrace{\mathcal{W}_{1_1}, \mathcal{W}_{1_2}, ..., \mathcal{W}_{1_{n_1}}}_{\mathcal{Tx}_1}, \underbrace{\mathcal{W}_{2_1}, \mathcal{W}_{2_2}, ..., \mathcal{W}_{2_{n_2}}}_{\mathcal{Tx}_2}, ..., \underbrace{\mathcal{W}_{k_1}, \mathcal{W}_{k_2}, ..., \mathcal{W}_{k_{n_k}}}_{\mathcal{Tx}_{n_{tx} = k}}, \underbrace{0, 0, ..., 0}_\text{padded zeroes}]$
+
+Here, the padded zeroes are added to make the length of $\mathsf{withdrawals}^{(n)}$ be the multiple of $C_{withdrawal-sub-tree-size}$.
+
+Therefore
+$$
+len(\mathsf{withdrawals}^{(n)}) \ mod \ C_{withdrawal-sub-tree-size} = 0
+$$
+
+#### [4.7.6.1] Withdrawal Tree Validation - W1: Index Validation
+
+Let $\mathsf{withdrawals}^{(n)}$ be defined in [4.7.6].
+Let $\mathsf{index_{withdrawals}}^{(n)}$ be defined in [6.2.1].
+
+Then,
+$$
+len(\mathsf{withdrawals}^{(n)}) + \mathsf{index_{withdrawals}}^{(n-1)} = \mathsf{index_{withdrawals}}^{(n)}
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code W1.
+
+#### [4.7.6.2] Withdrawal Tree Validation - W2: Max withdrawals
+
+Let $\mathsf{withdrawals}^{(n)}$ be defined in [4.7.6].
+Let $\mathsf{index_{withdrawal}}^{(n)}$ be defined in [6.2.1].
+Let $C_{max-withdrawal}$ be defined in [4.1.2].
+
+Then,
+$$
+len(\mathsf{withdrawals}^{(n)}) + \mathsf{index_{withdrawals}}^{(n-1)} \leq C_{max-withdrawal}
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code W2.
+
+#### [4.7.6.3] Withdrawal Tree Validation - W3: withdrawal Tree Root
+
+Let $\mathsf{Tree_{withdrawal}}^{(n)}$ be defined in [5.3.2].
+Let $\mathsf{withdrawals}^{(n)}$ be defined in [4.7.6].
+Let $\mathsf{root_{withdrawal}}^{(n)}$ be defined in [6.2.1].
+Let $C_{max-withdrawal}$ be defined in [4.1.2].
+Let $\mathsf{hash}(\mathcal{W})$ be defined in [3.1.3].
+
+Then, appending the withdrawal hash of each items in $\mathsf{withdrawals}^{(n)}$ to $\mathsf{Tree_{withdrawal}}^{(n-1)}$ should have an updated root that equals to $\mathsf{root_{withdrawal}}^{(n)}$.
+
+Otherwise, the validation contract returns `slashable = true` with code W3.
+
+#### [4.7.7] Transaction Validation
+
+#### [4.7.7.1] Transaction Validation - T1: Inclusion Proof
+
+Let $C_{ref-depth}$ be defined in [4.1.2].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, In_2, ...], [Out_1, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then for every $\mathcal{In} = (\mathsf{nullifier(\mathrm{U})}, \mathsf{root_{utxo}}^{(k)})$, it should satisfy 
+$$
+n - C_{ref-depth} \leq k
+$$
+or
+$\mathsf{root_{utxo}}^{(k)}$ should be stored in the `Zkopru.chain.finalizedUTXORoots`.
+
+Otherwise, the validation contract returns `slashable = true` with code T1.
+
+#### [4.7.7.2] Transaction Validation - T2: Outflow Type
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then for every $\mathcal{Out}$, 
+
+$$
+0 \leq t \leq 2
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code T2.
+
+#### [4.7.7.3] Transaction Validation - T3: Outflow Public Data
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then, for every $\mathcal{Out}$,
+$\mathcal{N}$ should be $(0, 0, 0, 0, 0, 0)$ if and only if $t = 0$.
+
+Otherwise, the validation contract returns `slashable = true` with code T3.
+
+#### [4.7.7.4] Transaction Validation - T4: Not a Registered Token
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+For every $\mathcal{Out}$,
+$\mathcal{N}.\mathsf{addr_{token}}$ should be registered on `Zkopru.chain.registeredERC20s` or `Zkopru.chain.registeredERC721s`.
+
+Otherwise, the validation contract returns `slashable = true` with code T4.
+
+#### [4.7.7.5] Transaction Validation - T5: NFT field is not empty
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+For every $\mathcal{Out}$,
+$\mathcal{N}.\mathsf{v'_{nft}}$ should be zero if $\mathcal{N}.\mathsf{addr_{token}}$ is not registered as an ERC721 on `Zkopru.chain.registeredERC721s`.
+
+Otherwise, the validation contract returns `slashable = true` with code T5.
+
+#### [4.7.7.6] Transaction Validation - T6: ERC20 field is not empty
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+For every $\mathcal{Out}$,
+$\mathsf{v'_{erc20}}$ should be zero if $\mathcal{N}.\mathsf{addr_{token}}$ is not registered as an ERC20 on `Zkopru.chain.registeredERC20s`.
+
+Otherwise, the validation contract returns `slashable = true` with code T6.
+
+#### [4.7.7.7] Transaction Validation - T7: NFT id 0 is not allowed
+
+Let $\mathcal{Out} = (\mathsf{hash(N)}, t, \mathcal{N})$ as defined in [3.1.1].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+For every $\mathcal{Out}$,
+$\mathcal{N}.\mathsf{v'_{nft}}$ should not be zero if $\mathcal{N}.\mathsf{addr_{token}}$ is registered as an ERC721 on `Zkopru.chain.registeredERC721s`.
+
+Otherwise, the validation contract returns `slashable = true` with code T7.
+
+This is because the SNARK circuit is designed not to support NFT id 0 by its technical limitation.
+
+#### [4.7.7.8] Transaction Validation - T8: Atomic Swap Pair Not Exists
+
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}_i), \pi_i, \mathsf{memo}_i)$ as defined in [3.4.1].
+
+If $\mathsf{swap}_i$ is not zero, there should exist another $\mathcal{Tx}^{(n)}_j$ that has $\mathsf{swap}_i$ for one of its outputs while $\mathsf{swap}_j$ is one of $\mathcal{Tx}^{(n)}_i$'s output.
+
+If there does not exist correct pair, the validation contract returns `slashable = true` with code T8.
+
+#### [4.7.7.9] Transaction Validation - T9: Used Nullifiers
+
+Let $\mathcal{In}$ be defined in [3.1.7].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then for every $\mathcal{In} = (\mathsf{nullifier(\mathrm{U})}, \mathsf{root_{utxo}}^{(k)})$, appending $\mathsf{nullifier(\mathrm{U})}$ to $\mathsf{Tree_{nullifier}}^{(n-1)}$ should not update the tree.
+
+Otherwise, it is considered as a used one and the validation contract returns `slashable = true` with code T9.
+
+#### [4.7.7.10] Transaction Validation - T10: Duplicated Nullifiers
+
+Let $\mathcal{In}$ be defined in [3.1.7].
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ...], [Out_1, Out_2, ...]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then for every $\mathcal{In} = (\mathsf{nullifier(\mathrm{U})}, \mathsf{root_{utxo}}^{(k)})$, $\mathsf{nullifier(\mathrm{U})}$ should be unique within the whole nullifiers of other transactions in the same block.
+
+Otherwise, it is considered as a used one and the validation contract returns `slashable = true` with code T10.
+
+#### [4.7.7.11] Transaction Validation - S1: Not a supported circuit
+
+Let $\mathcal{Tx}^{(n)}_i = ((\mathcal{[In_1, ..., In_x], [Out_1, ..., Out_y]}, f, \mathsf{swap}), \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then, verifyig key for circuit $\mathsf{C}_{(x,y)}$ should exists on `Zkopru.vks`.
+
+Otherwise, the validation contract returns `slashable = true` with code S1.
+
+#### [4.7.7.12] Transaction Validation - S2: SNARK fails
+
+Let $\mathcal{Tx}^{(n)}_i = (\mathcal{P}, \pi, \mathsf{memo})$ as defined in [3.4.1].
+Let $\mathsf{zVK}_{(x,y)}$ be the verifying key for circuit $\mathsf{C}_{(x,y)}$.
+
+Then,
+$$
+\mathsf{verify_{groth16}}(\mathcal{P}, \pi, \mathsf{vPK}_{(x,y)}) = 1
+$$
+
+Otherwise, the validation contract returns `slashable = true` with code S2.
+
+#### [4.7.7.13] Transaction Validation - S3: Range Check fails
+
+Let $p$ be defined in [1.1].
+Let $\mathcal{Tx}^{(n)}_i = (\mathcal{P}, \pi, \mathsf{memo})$ as defined in [3.4.1].
+
+Then, every value of $\mathcal{P}$ should be less than $p$.
+
+Otherwise, the validation contract returns `slashable = true` with code S3.
+
+## 5. Tree
+
+### 5.1 Sparse Merkle Tree
+
+#### [5.1.1] Tree definition
+
+Sparse Merkle Tree is a fixed depth Merkle tree that all leaves have a defined initial value. It is defined with $\mathsf{SMT  = (depth, hash, null)}$.
+
+#### [5.1.2] Structure
+
+Let $\mathsf{SMT}$ be defined in [5.1.1].
+
+Then, the tree has $\mathsf{depth} + 1$ number of layers. For example when the $\mathsf{depth} = 3$,
+```
+Depth 0 (Level 3):               d
+Depth 1 (Level 2):       c-------^-------c
+Depth 2 (Level 1):   b---^---b       b---^---b   
+Depth 3 (Level 0): a-^-a   a-^-a   a-^-a   a-^-a
+```
+
+And it can include $2^\mathsf{depth}$ of items.
+
+#### [5.1.3] Node index
+
+Let $\mathsf{SMT}$ be defined in [5.1.1].
+
+Then, it has $2^{\mathsf{depth} + 1} - 1$ tree nodes and each node has its own index and value.
+
+$$
+\mathsf{node = (index, value)}
+$$
+
+Index starts from the root node with value 1. After then, every left child node's index is the double of its parent's index and the right child node's index is plus one of its sibling left node.
+
+If we express the index in binary format the index map looks like below when the depth is 3:
+
+```
+Depth 0 (Level 3):                               (1)
+Depth 1 (Level 2):               (10)-------------^-------------(11)
+Depth 2 (Level 1):      (100)-----^-----(101)           (110)-----^-----(111)
+Depth 3 (Level 0): (1000)-^-(1001) (1010)-^-(1011) (1100)-^-(1101) (1110)-^-(1111)
+```
+
+
+#### [5.1.4] Tree Node
+
+Merkle tree has three types of node.
+
+* Leaf node
+* Branch node
+* Root node
+
+#### [5.1.4.1] Leaf node
+
+Let $\mathsf{depth, null}$ be defined in [5.1.1].
+
+Every leaf node has no child and its initial value is $\mathsf{null}$.
+Then index of leaf node should be greater or equal than $2^{\mathsf{depth}}$ and less than $2^{\mathsf{depth} + 1}$.
+
+As $\mathsf{SMT}$ usually stores items into the leaf nodes, leaf nodes also have $\mathsf{pos}$ value that is 
+$$
+\mathsf{pos} = \mathsf{node.index} - 2^\mathsf{depth}
+$$
+
+$\mathsf{pos}$ starts from 0 and less than $2^\mathsf{depth}$
+
+#### [5.1.4.2] Branch node
+
+Let $\mathsf{hash}$ be defined in [5.1.1].
+
+Every node except leaf node is kind of the branch node, and their value is decided by the values of their children nodes.
+
+Let $\mathsf{parent}$ be a branch node which has $\mathsf{left, right}$ for its children nodes.
+
+Then,
+
+$$
+\mathsf{parent.value} = \mathsf{hash(left.value, right.value)}
+$$
+
+
+Then index of leaf node should be greater or equal than 1 and less than $2^{\mathsf{depth}}$
+
+#### [5.1.4.3] Root node
+
+Root node is also a branch node which index is 1. The value of the root node is a compressed state of the tree.
+
+#### [5.1.5] Item & Merkle Root
+
+Let $\mathsf{SMT, hash, depth}$ be defined in [5.1.1].
+Let $\mathsf{node}$ be defined in [5.1.3].
+Let $\mathsf{pos}$ be defined in [5.1.4.1].
+Let $\mathsf{root}$ is the value of the root node of the $\mathsf{SMT}$.
+
+Let $\mathsf{item}$ be defined as
+$$
+\mathsf{item} = (\mathsf{pos}, \mathsf{value})
+$$
+
+
+Then, we can compute the root value using the $\mathsf{siblings}$ and $\mathsf{item}$
+
+$$
+\mathsf{root} = \mathsf{SMT.computeRoot(item, siblings)}
+$$
+
+where $\mathsf{siblings}$ are the value of all sibling nodes of its Merkle path.
+
+Using $\mathsf{item}$ and $\mathsf{siblings}$ we can prove an inclusion of the $\mathsf{item}$ in the $\mathsf{SMT}$. And also as $\mathsf{SMT}$ is a Sparse Merkle tree that has initial $\mathsf{null}$ value, we can also prove the non-inclusion proof using $\mathsf{null}$ and $\mathsf{pos}$.
+
+Here's the reference solidity code of the Merkle Root computation.
+```solidity
+uint256 immutable public DEPTH;
+
+function computeRoot(
+    function(bytes32, bytes32) pure returns(bytes32) hash,
+    uint256 pos,
+    bytes32 item,
+    bytes32[] sibligns
+)
+public
+pure
+returns (bytes32)
+{
+    require(siblings.length == DEPTH);
+    uint256 path = pos;
+    uint256 node = item;
+    for (uint256 i = 0; i < siblings.length; i++) {
+        if (path % 2 == 0) {
+            // right sibling
+            node = hash(node, siblings[i]);
+        } else {
+            // left sibling
+            node = hash(siblings[i], node);
+        }
+        path >>= 1;
+    }
+    return node;
+}
+```
+
+### 5.2 Tree updates
+
+#### [5.2.1] Append-only Merkle Tree
+
+Let $\mathsf{computeRoot}$ be defined in [5.1.5].
+
+Let $\mathsf{index}$ be the $\mathsf{pos}$ of the leaf node to update. Append-only merkle tree is a sparse merkle tree that updates leaves from left to right by incrementing $\mathsf{index}$.
+
+Then we can define the $\mathsf{append}$ function for $\mathsf{SMT}$ as
+
+$$
+\mathsf{(root_{next}, index_{next}, siblings_{next}) = SMT.append(root_{prev}, index_{prev}, siblings_{prev}, item)}
+$$
+
+where
+
+$\mathsf{index_{next}} = \mathsf{index_{prev}} + 1$
+$\mathsf{root_{prev}} == \mathsf{SMT.computeRoot(index_{prev}, 0, siblings_{prev})}$
+$\mathsf{root_{next}} == \mathsf{SMT.computeRoot(index_{next}, 0, siblings_{next})}$
+$\mathsf{root_{next}} == \mathsf{SMT.computeRoot(index_{prev}, item, siblings_{prev})}$
+
+#### [5.2.2] Batch append
+
+Let $\mathsf{append}$ be defined in [5.2.1]
+
+Then, we can define $\mathsf{batchAppend}$ as
+
+$$
+\mathsf{(root_{next}, index_{next}, siblings_{next}) = SMT.batchAppend(root_{prev}, index_{prev}, siblings_{prev}, items)}
+$$
+
+where 
+
+$\mathsf{(root_{i+1}, index_{i+1}, siblings_{i+1}) = SMT.append(root_{i}, index_{i}, siblings_{i}, item_i)}$
+$\mathsf{root}_1 = \mathsf{root_{prev}}$
+$\mathsf{root}_{n+1} = \mathsf{root_{next}}$
+$\mathsf{[item_1, item_2, ..., item_n] = items}$
+
+
+#### [5.2.3] Sub-tree Append
+
+To update the Merkle tree we can insert a small sub-tree instead of updating each leaf. For example, let's assume we're tyring to add 256 items to a tree which depth is 32. Then, we can update the tree with only $32$ hash computations while we have to compute $32 \times 256$ hashes when we try to update the tree item by item.
+
+First, let's divide a Sparse Merkle tree with sub-trees and its parent tree. For example,
+```
+                                    y
+                        y                       y        
+parent tree       y           y           y           y    
+--------------------------------------------------------
+sub trees      x     x     x     x     x     x     x     x  
+             x   x x   x x   x x   x x   x x   x x   x x   x 
+             ----- ----- ----- ----- ----- ----- ----- -----
+             sub1  sub2  sub3  sub4  sub5  sub6  sub7  sub8
+```
+
+
+Then we can define the sub-tree and parent tree as Sparse Merkle trees like
+
+$\mathsf{SubTree} = (d_{sub}, \mathsf{hash}, \mathsf{null})$
+$\mathsf{ParentTree} = (\mathsf{depth} - d_{sub}, \mathsf{hash}, \mathsf{SubTree.initialRoot})$
+
+And, divide the items into a fixed size chunks as
+
+$\mathsf{chunks} = [\mathsf{chunk_1, ..., chunk_k}] = [[sub^{(1)}_1, ..., sub^{(1)}_{n_1}], [sub^{(2)}_1, ..., sub^{(2)}_{n_2}], ..., [sub^{(k)}_1, ..., sub^{(k)}_{n_k}]]$
+
+where
+
+$\mathsf{items} = [\mathsf{item_1, ..., item_n}] = [sub^{(1)}_1, ..., sub^{(1)}_{n_1}, sub^{(2)}_1, ..., sub^{(2)}_{n_2}, ..., sub^{(k)}_1, ..., sub^{(k)}_{n_k}]$
 $n_1 = n_2 = ... = n_{k-1} = 2^{d_{sub}}$
-and
-$n_{k} = n - 2^{d_{sub}} \times (k - 1)$
+$n_k = n - (2^{d_{sub}}\times (k - 1))$
 
-#### [7.4.3]
+Using the chunks, construct sub-trees and calculate their roots as
 
-$root_{sub^{(i)}} = merkleRoot(sub^{(i)}_1, ..., sub^{(i)}_{n_i})$
-$root_{sub^{(k)}} = merkleRoot(sub^{(k)}_1, ..., sub^{(k)}_{n_k}, \underbrace{0, ..., 0}_{(2^{d_{sub}} - n_k)})$
+$\mathsf{subRoots} = [\mathsf{root}_{sub^{(1)}}, ..., \mathsf{root}_{sub^{(k)}}]$
+where 
+$(\mathsf{root}_{sub^{(i)}}, ,) = \mathsf{SubTree.batchAppend}(\mathsf{SubTree.initialRoot}, 0, \mathsf{SubTree.initialSiblings}, \mathsf{chunks}_{i})$
 
-#### [7.4.4]
+Finally, we can define the subtree appending as
 
-Then, $merkleProof(h, index, 0, siblings, root) = 1$
+$$
+\mathsf{(root_{next}, index_{next}, siblings_{next})} = \mathsf{subTreeAppend}(d_{sub}, \mathsf{root_{prev}, index_{prev}, siblings_{prev}, items})
+$$
 
-#### [7.4.5]
+where
 
-Let
-$siblings' = [sib_1, sib_2, ..., sib_{d_{SMT} - d_{sub}}]$ when $siblings = [sib_1, sib_2, ..., sib_{d_{SMT}}]$
-$subRoots = [root_{sub^{(1)}}, ..., root_{sub^{(k)}}]$
-$index' = index << d_{sub}$ and $index = index' >> d_{sub}$
-then,
+$\mathsf{(root_{next}, index_{next}, siblings_{next}) = ParentTree.batchAppend(root_{prev}, index_{prev}, siblings_{prev}, subRoots)}$
 
-#### [7.4.6]
+### 5.3 Trees
 
-$(root_{next}, index'_{next}, siblings'_{next}) = smtBatchAppend(h, root_{prev}, index'_{prev}, siblings'_{prev}, subRoots)$
+#### [5.3.1] UTXO Tree
 
-### 7.5 UTXO Tree
+Let $C_{utxo-tree-depth} = 48$
+Let $C_{utxo-subtree-depth} = 5$
+Let $\mathsf{poseidon_n}$ be defined in [1.4]
+Let $\mathsf{SMT}$ be defined in [5.1.1]
+Let $\mathsf{subTreeAppend}$ be defined in [5.2.3]
 
-#### [7.5.1]
+$\mathsf{Tree_{utxo}} = \mathsf{SMT}(C_{utxo-tree-depth}, \mathsf{poseidon_2}, 0)$ is a Sparse Merkle Tree that stores newly created UTXOs using $\mathsf{subTreeAppend}$ with $d_{sub} = C_{utxo-subtree-depth}$.
 
-$Tree_{U}$ is a sparse merkle tree to store UTXO leaves which $depth$ is $C_{utxo-tree-depth}$.
+#### [5.3.2] Withdrawal Tree
 
-#### [7.5.2]
+Let $C_{withdrawal-tree-depth} = 48$
+Let $C_{withdrawal-subtree-depth} = 5$
+Let $\mathsf{keccak256_2}$ be defined in [4.2.2.1]
+Let $\mathsf{Tree}$ be defined in [5.1.1]
+Let $\mathsf{subTreeAppend}$ be defined in [5.2.3]
 
-Let $l$ is a left child node and $r$ is a right child node of a branch node $b$ of $Tree_{U}$. Then, $b = poseidon_2(l, r)$
+$\mathsf{Tree_{withdrawal}} = \mathsf{SMT}(C_{withdrawal-tree-depth}, \mathsf{poseidon_2}, 0)$ is a Sparse Merkle Tree that stores newly created Withdrawals using $\mathsf{subTreeAppend}$ with $d_{sub} = C_{withdrawal-subtree-depth}$.
 
-#### [7.5.3]
+#### [5.3.3] Nullifier Tree
 
-Let ${B}_n$ is the $n$-th block and its body contains $[{MD}_1, ..., {MD}_m]$ and $[{TX}_1, ..., {TX}_n]$. Then,
+Let $C_{nullifier-tree-depth} = 254$
+Let $\mathsf{keccak256_2}$ be defined in [4.2.2.1]
+Let $\mathsf{Tree}$ be defined in [5.1.1]
+Let $p$ be defined in [1.1]
 
-$\mathbb{O} = [{O^{{TX}_1}_1}, ..., {O^{{TX}_1}_{k_1}}] \cup [{O^{{TX}_2}_1}, ..., {O^{{TX}_2}_{k_2}}] \cup \cdots \cup [{O^{{TX}_m}_1}, ..., {O^{{TX}_m}_{k_m}}]$
+$\mathsf{Tree_{nullifier}} = \mathsf{SMT}(C_{nullifier-tree-depth}, \mathsf{keccak256_2}, 0)$ is a Sparse Merkle Tree that stores $1$ into the leaf node where its $\mathsf{pos} = nullifier$ to mark that $nullifier$ as included in the tree.
 
-$\mathbb{U}^{deposit} = [{U^{{MD}_1}_1}, ..., {U^{{MD}_1}_{k_1}}] \cup [{U^{{MD}_2}_1}, ..., {U^{{MD}_2}_{k_2}}] \cup \cdots \cup [{U^{{MD}_m}_1}, ..., {U^{{MD}_m}_{k_m}}]$
-$\mathbb{U}^{tx} = \{ O | O \in \mathbb{O}, t(O) = 0\}$.
+To cover all possible nullifiers the number of items of the nullifier tree $\mathsf{Tree_{nullifier}} = 2^{C_{nullifier-tree-depth}} >= p$
 
-#### [7.5.4]
+## 6. Serialization
 
+### 6.1 Block Definition
 
-Let $leaves_U = \mathbb{U}^{deposit} \cup \mathbb{U}^{tx}$, then
-$(root^{(n+1)}_U, index^{(n+1)}_U, siblings^{(n+1)}_U) = smtSubtreeAppend(poseidon_2, root^{(n)}_U, index^{(n)}_U, siblings^{(n)}_U, leaves)$
+#### [6.1.1] Block
 
-### 7.6 Withdrawal Tree
+The $n$-th Zkopru layer 2 block is denoted as $\mathsf{Block}^{(n)} = (\mathsf{Header}^{(n)}, \mathsf{Body}^{(n)})$.
 
-#### [7.6.1]
+#### [6.1.2] Header
 
-$Tree_{W}$ is a sparse merkle tree to store Withdrawal outputs which $depth$ is $C_{utxo-tree-depth}$.
+Let $\mathsf{Header}^{(n)}$ be the header of $n$-th block and consists of
 
-#### [7.6.2]
+| Symbol | Description |
+| -------- | -------- | -------- |-------- |
+| $\mathsf{proposer}^{(n)}$ | Ethereum address of the proposer of this block | 
+| $\mathsf{parent}^{(n)}$ | The hash value of its parent block |
+| $\mathsf{fee}^{(n)}$ | Fee for the block proposer |
+| $\mathsf{root}^{(n)}_\mathsf{utxo}$ | $\mathsf{root}$ of the updated $\mathsf{Tree_{utxo}}$|
+| $\mathsf{index}^{(n)}_\mathsf{utxo}$ | Starting position of new leaf of $\mathsf{Tree_{utxo}}$ |
+| $\mathsf{root}^{(n)}_\mathsf{nullifier}$ | $\mathsf{root}$ of the updated $\mathsf{Tree_{nullifier}}$|
+| $\mathsf{root}^{(n)}_\mathsf{withdrawal}$ | $\mathsf{root}$ of the updated $\mathsf{Tree_{withdrawal}}$|
+| $\mathsf{index}^{(n)}_\mathsf{withdrawal}$ | Starting position of new leaf of $\mathsf{Tree_{withdrawal}}$ |
+| $\mathsf{txRoot}^{(n)}$ | Merkle root of transaction hashes|
+| $\mathsf{depositRoot}^{(n)}$ | Merkle root of mass deposit hashes|
+| $\mathsf{migrationRoot}^{(n)}$ | Merkle root of mass migration hashes|
 
-Let $l$ is a left child node and $r$ is a right child node of a branch node $b$ of $Tree_{W}$. Then, $b = keccak256(l, r)$
+#### [6.1.3] Body
 
-#### [7.6.3]
+Let $\mathsf{Body}^{(n)}$ be the body of $n$-th block and consists of
 
-Let ${B}_n$ is the $n$-th block and its body contains $[{TX}_1, ..., {TX}_n]$. Then,
+| Symbol | Description |
+| -------- | -------- |
+| $\mathrm{TXs}^{(n)}$ | $=[\mathcal{Tx}_1^{(n)}, ..., \mathcal{Tx}_{n_{tx}}^{(n)}]$. Array of transactions.| 
+| $\mathrm{MDs}^{(n)}$ | $=[\mathrm{MD}_1^{(n)}, ..., \mathrm{MD}_{n_{md}}^{(n)}]$. Array of mass deposits.| 
+| $\mathrm{MMs}^{(n)}$ | $=[\mathrm{MM}_1^{(n)}, ..., \mathrm{MM}_{n_{mm}}^{(n)}]$. Array of mass migrations.|
 
-$\mathbb{O} = [{O^{{TX}_1}_1}, ..., {O^{{TX}_1}_{k_1}}] \cup [{O^{{TX}_2}_1}, ..., {O^{{TX}_2}_{k_2}}] \cup \cdots \cup [{O^{{TX}_m}_1}, ..., {O^{{TX}_m}_{k_m}}]$
-$\mathbb{W} = \{ O | O \in \mathbb{O}, t(O) = 1\} = \{W_1, ..., W_{n_W}\}$
+Where 
+$\mathcal{Tx}_i^{(n)}$ is the$ i$-th transaction of the $n$-th block.
+$\mathrm{MD}_i^{(n)}$ is the $i$-th mass deposit of the $n$-th block.
+$\mathrm{MM}_i^{(n)}$ is the $i$-th mass migration of the $n$-th block.
 
-#### [7.6.4]
+### 6.2 Header Serialization
 
-Let $leaves_W = [W_1, ..., W_{n_W}]$, then
-$(root^{(n+1)}_W, index^{(n+1)}_W, siblings^{(n+1)}_W) = smtSubtreeAppend(keccak256, root^{(n)}_W, index^{(n)}_W, siblings^{(n)}_W, leaves_W)$
+#### [6.2.1]
 
-### 7.7 Nullifier Tree
+Let $\mathsf{proposer}^{(n)}$, $\mathsf{parent}^{(n)}$, $\mathsf{fee}^{(n)}$, $\mathsf{root}^{(n)}_\mathsf{utxo}$, $\mathsf{index}^{(n)}_\mathsf{utxo}$, $\mathsf{root}^{(n)}_\mathsf{withdrawal}$, $\mathsf{index}^{(n)}_\mathsf{withdrawal}$, $\mathsf{root}^{(n)}_\mathsf{nullifier}$, $\mathsf{txRoot}^{(n)}$, $\mathsf{depositRoot}^{(n)}$, and $\mathsf{migrationRoot}^{(n)}$ be defined in [6.1.2]
 
-#### [7.7.1]
+Then, we can define their serialized form as below:
 
-$Tree_{N}$ is a sparse merkle tree to store nullifiers which $depth$ is $C_{nullifier-tree-depth}$.
+| Value | Serialized | Serialization |
+| -------- | -------- | -------- |-------- |
+| $\mathsf{proposer}^{(n)}$ | $\mathtt{proposer}^{(n)}$ |20 bytes / big-endian |
+| $\mathsf{parent}^{(n)}$ | $\mathtt{parent}^{(n)}$ | 32 bytes / big-endian |
+| $\mathsf{fee}^{(n)}$ | $\mathtt{fee}^{(n)}$ | 32 bytes / big-endian |
+| $\mathsf{root}^{(n)}_\mathsf{utxo}$ | $\mathtt{root}^{(n)}_\mathsf{utxo}$ | 32 bytes / big-endian |
+| $\mathsf{index}^{(n)}_\mathsf{utxo}$ |  $\mathtt{index}^{(n)}_\mathsf{utxo}$ | 32 bytes / big-endian |
+| $\mathsf{root}^{(n)}_\mathsf{nullifier}$  |  $\mathtt{root}^{(n)}_\mathsf{nullifier}$  | 32 bytes / big-endian |
+| $\mathsf{root}^{(n)}_\mathsf{withdrawal}$  | $\mathtt{root}^{(n)}_\mathsf{withdrawal}$  | 32 bytes / big-endian | 
+| $\mathsf{index}^{(n)}_\mathsf{withdrawal}$ | $\mathtt{index}^{(n)}_\mathsf{withdrawal}$ | 32 bytes / big-endian |
+| $\mathsf{txRoot}^{(n)}$ |  $\mathtt{txRoot}^{(n)}$ | 32 bytes / big-endian |
+| $\mathsf{depositRoot}^{(n)}$ |  $\mathtt{depositRoot}^{(n)}$ | 32 bytes / big-endian |
+| $\mathsf{migrationRoot}^{(n)}$ |  $\mathtt{migrationRoot}^{(n)}$ | 32 bytes / big-endian |
 
-#### [7.7.2]
+Then $\mathtt{Header}^{(n)}$, the serialized form of $\mathsf{Header}^{(n)}$, is the concatenation of $(\mathsf{proposer}^{(n)}, \mathsf{parent}^{(n)}, \mathsf{fee}^{(n)}, \mathsf{root}^{(n)}_\mathsf{utxo}, \mathsf{index}^{(n)}_\mathsf{utxo}, \mathsf{root}^{(n)}_\mathsf{nullifier}, \mathsf{root}^{(n)}_\mathsf{withdrawal}, \\
+\mathsf{index}^{(n)}_\mathsf{withdrawal}, \mathsf{txRoot}^{(n)}, \mathsf{depositRoot}^{(n)}, \mathsf{migrationRoot}^{(n)})$
 
-$2^{C_{nullifier-tree-depth}} > size(\mathbb{F})$
+### 6.3 Transaction Serialization
 
-#### [7.7.3]
+#### [6.3.1] Dynamic sized buffer
 
-Let $l$ is a left child node and $r$ is a right child node of a branch node $b$ of $Tree_{N}$. Then, $b = keccak256(l, r)$
+Prepare a dynamic sized buffer, $\mathtt{buff}_{tx_{i}}$. We will push bytes data to the buffer by the following sequences. The final state of $\mathtt{buff}_{tx_{i}}$ after appending all data becomes $\mathtt{Tx}_i$.
 
-#### [7.7.4]
+#### [6.3.2] Input note length
 
-Let ${B}_n$ is the $n$-th block and its body contains $[{TX}_1, ..., {TX}_n]$. Then,
+Let $m$ be the number of input notes that is defined in [3.4.1].
+Store $m$ into a single byte and push it to $\mathtt{buff}_{tx_{i}}$.
 
-$\mathbb{Nullifiers} = \{ nullifier(U) | U \in \mathbb{U^{tx}}\}$
+#### [6.3.3] Input notes
 
-#### [7.7.5]
+Let $\mathcal{In}_i$ be the $i$-th input note of $\mathcal{Tx}$ as it's defined in [3.4.1]
+Let $m$ be the number of input notes that is defined in [3.4.1].
 
-Let $(root_{next}) = nullify(h, root_{prev}, index, siblings)$ where
-$h$: hash function to calculate branch node.
-$root$: The root node value of the tree.
-$index$: The starting index to start appending leaves.
+Starting from $i$ = 1 and repeat the below steps until $i$ is less than or equal to $m$:
 
-then for every $N \in \mathbb{Nullifiers}$,
-#### [7.7.6]
+1. Let $(\mathsf{nullifier}(\mathrm{U}), \mathsf{root_{utxo}}^{(n)}) = \mathcal{In}_i$
+2. Serialize $\mathsf{nullifier}(\mathrm{U})$ into 32 bytes buffer with big-endian.
+3. Serialize $\mathsf{root_{utxo}}^{(n)}$ in to 32 bytes buffer with big-endian.
+4. Concatenate the serialized $\mathsf{nullifier}(\mathrm{U})$ and $\mathsf{root_{utxo}}^{(n)}$ into 64 bytes buffer and let it be $\mathtt{In}_i$
+5. Push $\mathtt{In}_i$ to $\mathtt{buff}_{tx_{i}}$
 
-$merkleProof(keccak256, N, 0, siblings, root_{prev}) = 1$
+#### [6.3.4] Output note length
 
-#### [7.7.7]
+Let $n$ be the number of output notes that is defined in [3.4.1].
+Store $n$ into a single byte and push it to $\mathtt{buff}_{tx_{i}}$.
 
-$merkleProof(keccak256, N, C_{exist}, siblings, root_{next}) = 1$
+#### [6.3.5] Output notes
 
-## 8. Block
+Let $\mathcal{Out}_i$ be the $i$-th output note of $\mathcal{Tx}$ as it's defined in [3.4.1]
+Let $n$ be the number of output notes that is defined in [3.4.1].
 
-#### [8.1]
+Starting from $i$ = 1 and repeat the below steps until $i$ is less than or equal to $n$:
 
-The $n$-th block $B^{(n)} = \{Header^{(n)}, Body^{(n)}\}$
+1. Let $(\mathsf{hash}(\mathsf{N}), t, \mathcal{N}) = \mathcal{Out}_i$ and 
+$\mathcal{N} = \mathsf{(to, v'_{eth}, addr'_{token}, v'_{erc20}, v'_{nft}, fee_{L1})}$ as defined in [3.1.1]
+2. Prepare a dynamic sized buffer $\mathtt{buff}_{out_i}$.
+3. Serialize $\mathsf{hash}(\mathsf{N})$ into 32 bytes data with big-endian and push them to $\mathtt{buff}_{out_i}$.
+4. Store $t$ into a single byte with big-endian and push it to $\mathtt{buff}_{out_i}$.
+5. If $t$ is not zero,
+    1. Prepare 168 bytes buffer $\mathtt{buff}_{public_i}$
+    2. Serialize $\mathsf{to}$ to a 20 bytes buffer with big-endian.
+    3. Serialize $\mathsf{v'_{eth}}$ to a 32 bytes data with big-endian.
+    4. Serialize $\mathsf{addr'_{token}}$ to a 20 bytes data with big-endian.
+    5. Serialize $\mathsf{v'_{erc20}}$ to a 32 bytes data with big-endian.
+    6. Serialize $\mathsf{v'_{nft}}$ to a 32 bytes data with big-endian.
+    7. Serialize $\mathsf{fee_{L1}}$ to a 32 bytes data with big-endian.
+    8. Concatenate the serialized data and store them to $\mathtt{buff}_{public_i}$.
+    9. Push $\mathtt{buff}_{public_i}$ to $\mathtt{buff}_{out_i}$
+6. Push $\mathtt{buff}_{out_i}$ to $\mathtt{buff}_{tx_i}$
 
-#### [8.2]
+#### [6.3.6] Transaction Fee
 
-$Header^{(n)} = \{proposer^{(n)},  h(B^{(n-1)}), fee^{(n)}, root^{(n)}_U, index^{(n)}_U, root^{(n)}_N, root^{(n)}_W, index^{(n)}_W, \\ \ merkleRoot(\mathbb{Tx^{(n)}}), merkleRoot(\mathbb{MD^{(n)}}), , merkleRoot(\mathbb{MM^{(n)}})\}$
+Let $f$ be the transaction fee for $\mathcal{Tx}$ as defined in [3.2.6].
+Serialize $f$ into a 32 bytes buffer with big-endian, and push it to $\mathtt{buff}_{tx_i}$.
 
-#### [8.3]
+#### [6.3.7] SNARK
 
-$Body^{(n)} = \{\mathbb{Tx}^{(n)}, \mathbb{MM}^{(n)}, \mathbb{MD}^{(n)}\}$ where
-$\mathbb{Tx}^{(n)} = [TX^{(n)}_1, TX^{(n)}_2, ..., TX^{(n)}_{L_{\mathbb{Tx}}}]$
-$\mathbb{MD}^{(n)} = [MD^{(n)}_1, MD^{(n)}_2, ..., MD^{(n)}_{L_{\mathbb{MD}}}]$
-$\mathbb{MM}^{(n)} = [MM^{(n)}_1, MM^{(n)}_2, ..., MM^{(n)}_{L_{\mathbb{MM}}}]$
+Let $\pi = (\mathbf{A}, \mathbf{B}, \mathbf{C})$ be defined in [3.2.5].
 
-#### [8.4]
+1. Prepare 256 bytes empty buffer $\mathtt{buff}_{snark}$.
+2. Serialize $\mathbf{A}.x$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+3. Serialize $\mathbf{A}.y$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+4. Serialize $\mathbf{B}.{x_1}$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+5. Serialize $\mathbf{B}.{x_2}$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+6. Serialize $\mathbf{B}.{y_1}$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+7. Serialize $\mathbf{B}.{y_2}$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+8. Serialize $\mathbf{C}.x$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+9. Serialize $\mathbf{C}.y$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{snark}$.
+10. Push $\mathtt{buff}_{snark}$ to $\mathtt{buff}_{tx_i}$.
 
-$fee^{(n)} = \Sigma_{i = 0}^{L_{\mathbb{Tx}}} fee(TX^{(n)}_{i}) + \Sigma_{i = 0}^{L_{\mathbb{MD}}} fee(MD^{(n)}_{i}) + \Sigma_{i = 0}^{L_{\mathbb{MM}}} fee(MM^{(n)}_{i})$
+#### [6.3.8] Extra data
 
-## 9. Serialization
+Serialized form of transaction can have some extra data. Zkopru expresses the existence of extra data using 2 bits.
 
-### 9.1. Transaction
+1. Prepare a single byte $\mathtt{b}$.
+2. Let $\mathsf{swap}$ be defined in [3.2.6]. If $\mathsf{swap}$ is not zero, store 1 on its right bit position.
+3. If $\mathtt{Tx}$ has a memo field, store 1 on its second right bit position.
+4. Push the byte $\mathtt{b}$ into $\mathtt{buff}_{tx_i}$
+5. If the right most bit of $\mathtt{b}$ is 1, serialize $\mathsf{swap}$ to a 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{tx_i}$.
+6. Let $\mathsf{memo}$ be defined in [3.3.1]. If the second right most bit of $\mathtt{b}$ is 1, push that 81 bytes $\mathsf{memo}$ data to $\mathtt{buff}_{tx_i}$
 
-#### [9.1.1]
+#### [6.3.9] $\mathtt{TX}_i$
 
-The first byte of Zk transaction data is the length of the input notes.
+Freeze the dynamic sized buffer $\mathtt{buff}_{tx_i}$ and let it be $\mathtt{TX}_i$
 
-#### [9.1.2]
+### 6.4 Mass Deposit Serialization
 
-If the parsed length from [[9.1.1]](#9.1.1) is $m$, the next $64 \cdot m$ bytes from [[9.1.1]](#9.1.1) are the concatenation of $[(root_{UTXO}^{k_1}, nullifier({U^{in}}_1)), ..., (root_{UTXO}^{k_m}, nullifier({U^{in}}_m))]$ where $N_{latest} - c_{ref}\leq k < N_{latest}$. here, $N_{latest}$ is the latest block number and $c_{ref}$ is defined in [[11.4]](#11.4).
+#### [6.4.1] Mass Deposit
 
-#### [9.1.3]
+Let $\mathrm{MD}_i$ be the $i$-th Mass Deposit of $\mathsf{Block}^{(n)}$.
 
-The next byte right after [[9.1.2]](#9.1.2) is the length of the output notes.
+1. Prepare a 64 bytes buffer $\mathtt{buff}_{md_i}$.
+2. Let $(\mathsf{merged}, f_{MD}) = \mathrm{MD}_i$ as defined in [4.2.2.3]
+3. Serialize $\mathsf{merged}$ into 32 bytes buffer with big-endian.
+4. Serialize $f_{MD}$ into 32 bytes buffer with big-endian.
+5. Concatenate the serialized $\mathsf{merged}$ and $f_{MD}$ into $\mathtt{buff}_{md_i}$ and let it be $\mathtt{MD}_i$
 
-#### [9.1.4]
+### 6.5 Mass Migration Serialization
 
-If the parsed length from [[9.1.3]](#9.1.3) is $n$, the next bytes from [[9.1.3]](#9.1.3) should be the concatenation of $[data({O}_1), ..., data({O}_n)]$
+#### [6.5.1] Dynamic Sized Buffer
 
-<div style="padding-left: 5rem">
+Prepare a dynamic sized buffer, $\mathtt{buff}_{mm_{i}}$. We will push bytes data to the buffer by the following sequences. The final state of $\mathtt{buff}_{mm_{i}}$ after appending all data becomes $\mathtt{MM}_i$.
 
-#### [9.1.4.1]
+#### [6.5.2] Destination and total ETH 
 
-The first 32 bytes of $data({O}_i)$ is the $h({O}_i)$
 
-#### [9.1.4.2]
+Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
 
-The next 1 bytes from [[9.1.4.1]](#9.1.4.1) is $t({O}_i) \in [0, 1, 2]$
+1. Serialize $\mathsf{dest}$ into 20 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+2. Serialize $\mathsf{v_{eth}}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
 
-#### [9.1.4.3]
+#### [6.5.3] Mass Deposit Object for Destination
 
-If $t({O}_i)$ is $0$, ${O}_i$ is a UTXO type and [[9.1.4.2]](#9.1.4.2) is the end of the data.
+Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
 
-#### [9.1.4.4]
+1. Serialize $\mathrm{MD}$  defined in [6.5.1] into a 64 bytes buffer as defined in [6.4.1].
+2. Push the serialized $\mathrm{MD}$ into $\mathtt{buff}_{mm_i}$.
 
-If $t({O}_i)$ is $1$, ${O}_i$ is a withdrawal type and has 168 bytes of public data $pd({O}_i)$.
+#### [6.5.4] ERC20 assets
 
+Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
+Let $\mathsf{migration_{erc20}} = \mathsf{[(addr_1, amount_1), ..., (addr_{\mathit{n}_{erc20}}, amount_{\mathit{n}_{erc20}})]}$
 
-<div style="padding-left: 5rem">
+1. Prepare a dynamic sized buffer $\mathtt{buff}_{erc20}$.
+2. Store the length of erc20 assets $n_\mathsf{erc20}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc20}$.
+3. Starting from $j$ = 1 and repeat the below steps until $j$ is less than or equal to $n_\mathsf{erc20}$:
+    1. Store $\mathsf{addr}_j$ into 20 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
+    1. Store $\mathsf{amount}_j$ into 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
+4. Push $\mathtt{buff}_{erc20}$ to $\mathtt{buff}_{mm_i}$
 
-#### [9.1.4.4.1]
+#### [6.5.5] ERC721 assets
 
-The first 20 bytes of $pd({O}_i)$ is $data_{to}({O}_i)$ which means the Ethereum address of the withdrawal destination. That address should be able to make the withdrawal transaction.
+Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
+Let $\mathsf{migration_{erc721}} = \mathsf{[(addr_1, nfts_1), ..., (addr_{\mathit{n}_{erc721}}, nfts_{\mathit{n}_{erc721}})]}$
 
+1. Prepare a dynamic sized buffer $\mathtt{buff}_{erc721}$.
+2. Store the length of erc721 assets $n_\mathsf{erc721}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc721}$.
+3. Starting from $j$ = 1 and repeat the below steps until $j$ is less than or equal to $n_\mathsf{erc721}$:
+    1. Store $\mathsf{addr}_j$ into 20 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
+    2. Let $\mathsf{nfts}_j = \mathsf{[id_1, id_2, ..., id_\mathit{n_{nft_j}}]}$.
+    3. Store $n_{nft_j}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc721}$.
+    4. Starting from $k$ = 1 and repeat the below steps until $k$ is less than or equal to $n_{nft_j}$:
+        1. Store $\mathsf{id}_k$ into 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc721}$.
+4. Push $\mathtt{buff}_{erc721}$ to $\mathtt{buff}_{mm_i}$
 
-#### [9.1.4.4.2]
+#### [6.5.6] $\mathtt{MM}_i$
 
-The next 32 bytes from [[9.1.4.4.1]](#9.1.4.4.1) is $data_{eth}({O}_i)$ which means the amount of Ether to withdraw.
+Freeze the dynamic sized buffer $\mathtt{buff}_{mm_i}$ and let it be $\mathtt{MM}_i$
 
-#### [9.1.4.4.3]
+### 6.6 Body Serialization
 
-The next 20 bytes from [[9.1.4.4.2]](#9.1.4.4.2) is $data_{token}({O}_i)$ which means the address of the token if it contains ERC20 tokens or an NFT.
+#### [6.6.1] Dynamic Sized Buffer
 
-#### [9.1.4.4.4]
+Prepare a dynamic sized buffer, $\mathtt{buff}_{body}$. We will push bytes data to the buffer by the following sequences. The final state of $\mathtt{buff}_{body}$ after appending all data becomes $\mathtt{Body}^{(n)}$.
 
-The next 32 bytes from [[9.1.4.4.3]](#9.1.4.4.3) is $data_{erc20}({O}_i)$ which means the amount of the token to withdraw if $data_{token}({O}_i)$ is registered as an ERC20 token on the contract. Or it should be zero.
+#### [6.6.2] Add Transactions
 
+Let $\mathsf{Block}^{(n)}$ has $n_{tx}$ number of transactions.
 
-#### [9.1.4.4.5]
+1. Prepare a dynamic sized buffer $\mathtt{buff}_{tx}$ to store all serialized transactions.
+2. Store $n_{tx}$ into a single byte with big-endian and push it into $\mathtt{buff}_{tx}$.
+3. Starting from $i$ = 1 and repeat the below steps until $i$ is less than or equal to $n_{tx}$:
+    1. Serialize $\mathcal{Tx}_i$ to $\mathtt{Tx}_i$ as defined in [6.3.9]
+    2. Push $\mathtt{Tx}_i$ to $\mathtt{buff}_{tx}$.
+4. Let $\mathtt{buff}_{tx}$ be $\mathtt{TXs}^{(n)}$ and push it to $\mathtt{buff}_{body}$
 
-The next 32 bytes from [[9.1.4.4.4]](#9.1.4.4.4) is $data_{nft}({O}_i)$ which means the NFT id to withdraw if $data_{token}({O}_i)$ is registered as an ERC721 token on the contract. Or it should be zero.
+#### [6.6.3] Add Mass Deposits
 
-:::warning
-Note that Zkopru does not support NFT id 0.
-:::
+Let $\mathsf{Block}^{(n)}$ has $n_{md}$ number of mass deposits.
 
-#### [9.1.4.4.6]
+1. Prepare a dynamic sized buffer $\mathtt{buff}_{md}$ to store all serialized mass deposits.
+2. Store $n_{md}$ into a single byte with big-endian and push it into $\mathtt{buff}_{md}$.
+3. Starting from $i$ = 1 and repeat the below steps until $i$ is less than or equal to $n_{md}$:
+    1. Serialize $\mathrm{MD}_i$ to $\mathtt{MD}_i$ as defined in [6.4.1]
+    2. Push $\mathtt{MD}_i$ to $\mathtt{buff}_{md}$.
+4. Let $\mathtt{buff}_{md}$ be $\mathtt{MDs}^{(n)}$ and push it to $\mathtt{buff}_{body}$
 
-The next 32 bytes from [[9.1.4.4.5]](#9.1.4.4.5) is $data_{fee}({O}_i)$ which means the additional fee for the pre-payer when the withdrawer wants to withdraw the note instantly.
+#### [6.6.4] Add Mass Migrations
 
-</div>
+Let $\mathsf{Block}^{(n)}$ has $n_{mm}$ number of mass migrations.
 
-#### [9.1.4.5]
+1. Prepare a dynamic sized buffer $\mathtt{buff}_{mm}$ to store all serialized transactions.
+2. Store $n_{mm}$ into a single byte with big-endian and push it into $\mathtt{buff}_{mm}$.
+3. Starting from $i$ = 1 and repeat the below steps until $i$ is less than or equal to $n_{mm}$:
+    1. Serialize $\mathrm{MM}_i$ to $\mathtt{MM}_i$ as defined in [6.3.9]
+    2. Push $\mathtt{MM}_i$ to $\mathtt{buff}_{mm}$.
+4. Let $\mathtt{buff}_{mm}$ be $\mathtt{MMs}^{(n)}$ and push it to $\mathtt{buff}_{body}$
 
-If $t({O}_i)$ is $2$, ${O}_i$ is a migration type and has 168 bytes of public data $pd({O}_i)$.
 
+#### [6.6.5] $\mathtt{Body}^{(n)}$
 
-<div style="padding-left: 5rem">
+$\mathtt{Body}^{(n)}$ is the serialized form of $\mathsf{Body}^{(n)}$ and consists of
 
-#### [9.1.4.5.1]
+| Symbol | Description |
+| -------- | -------- |
+| $\mathtt{TXs}^{(n)}$ | $=[\mathtt{TX}_1^{(n)}, ..., \mathtt{TX}_{n_{tx}}^{(n)}]$| 
+| $\mathtt{MDs}^{(n)}$ | $=[\mathtt{MD}_1^{(n)}, ..., \mathtt{MD}_{n_{md}}^{(n)}]$| 
+| $\mathtt{MMs}^{(n)}$ | $=[\mathtt{MM}_1^{(n)}, ..., \mathtt{MM}_{n_{mm}}^{(n)}]$|
 
-The first 20 bytes of $pd({O}_i)$ is $data_{to}({O}_i)$ which means the destination contract address of the migration. That address should have `acceptMigration(bytes32, bytes32, uint256)` function to support migration.
+Where 
+$\mathtt{TX}_i^{(n)}$ is the serialized form of $\mathcal{Tx}_i$, the $i$-th transaction of the $n$-th block.
+$\mathtt{MD}_i^{(n)}$ is the serialized form of $\mathrm{MD}_i$, the $i$-th mass deposit of the $n$-th block.
+$\mathtt{MM}_i^{(n)}$ is the serialized form of $\mathrm{MM}_i$, the $i$-th mass migration of the $n$-th block.
 
+Freeze the dynamic sized buffer $\mathtt{buff}_{body}$ and let it be $\mathtt{Body}^{(n)}$
 
-#### [9.1.4.5.2]
+### 6.7 Block Serialization
 
-The next 32 bytes from [[9.1.4.5.1]](#9.1.4.5.1) is $data_{eth}({O}_i)$ which means the amount of Ether to migrate.
+#### [6.7.1] Block
 
-#### [9.1.4.5.3]
+Let $\mathtt{Header}^{(n)}$ be defined in [6.2.1].
+Let $\mathtt{Body}^{(n)}$ be defined in [6.6.5].
 
-The next 20 bytes from [[9.1.4.5.2]](#9.1.4.5.2) is $data_{token}({O}_i)$ which means the address of the token if it contains ERC20 tokens or an NFT.
+Then, $\mathtt{Block}^{(n)}$ is the serialized form of $\mathsf{Block}^{(n)}$ and equals the concatenation of $\mathtt{Header}^{(n)}$ and $\mathtt{Body}^{(n)}$.
 
-#### [9.1.4.5.4]
+#### [6.7.2] Finalization Data
 
-The next 32 bytes from [[9.1.4.5.3]](#9.1.4.5.3) is $data_{erc20}({O}_i)$ which means the amount of the token to migrate if $data_{token}({O}_i)$ is registered as an ERC20 token on the contract. Or it should be zero.
+To finalize a block proposal, it requires the header data, and the mass deposits and mass migrations.
 
-#### [9.1.4.5.5]
+Let $\mathtt{Header}^{(n)}$ be defined in [6.2.1].
+Let $\mathtt{MDs}^{(n)}$ be defined in [6.6.5].
+Let $\mathtt{MMs}^{(n)}$ be defined in [6.6.5].
 
-The next 32 bytes from [[9.1.4.5.4]](#9.1.4.5.4) is $data_{nft}({O}_i)$ which means the NFT id to migrate if $data_{token}({O}_i)$ is registered as an ERC721 token on the contract. Or it should be zero.
+First, compute the data checksum of original block data using keccak256:
+$$
+\mathsf{checksum} = keccak256(\mathtt{Block}^{(n)})
+$$
 
-:::warning
-Note that Zkopru does not support NFT id 0.
-:::
+Then, $\mathtt{Finalization}^{(n)}$ is the concatenation of $(\mathsf{checksum}, \mathtt{Header}^{(n)}, \mathtt{MDs}^{(n)}, \mathtt{MMs}^{(n)})$.
 
-#### [9.1.4.5.6]
+## 7. Miscellaneous
 
-The next 32 bytes from [[9.1.4.5.5]](#9.1.4.5.5) is $data_{fee}({O}_i)$ which means the fee for the destination contract's block proposer.
+#### [7.1]: MerkleRoot
 
-</div>
-
-</div>
-
-#### [9.1.5]
-
-The next 32 bytes after [[9.1.4]](#9.1.4) is the transaction fee for the block proposer.
-
-#### [9.1.6]
-
-The next 256 bytes after [[9.1.5]](#9.1.5) is $proof({TX}) = (a, b, c)$ which is the concatenation of $[a.x, a.y, b.x_1, b.x_2, b.y_1, b.y_2, c.x, c.y]$.
-
-#### [9.1.7]
-
-The next byte after [[9.1.6]](#9.1.6) is the indicator of extra data.
-
-#### [9.1.8]
-
-If the indicator that is parsed from [[9.1.7]](#9.1.7) has 1 on its right most bit position, the next 32 bytes after [[9.1.7]](#9.1.7) is $h({O_{swap}})$ which should be exists in its paired transaction's output notes.
-
-#### [9.1.9]
-
-If the indicator that is parsed from [[9.1.7]](#9.1.7) has 1 on its second right most bit position, the next 81 bytes after [[9.1.8]](#9.1.8) is $memo({TX})$.
-
-
-<div style="padding-left: 5rem">
-
-#### [9.1.9.1]
-
-The first 32 bytes of $memo({TX})$ is the ephemeral public key $E = e \cdot G$.
-
-#### [9.1.9.2]
-
-The next 49 bytes after [[9.1.9.1]](#9.1.9.1) is the encrypted data using the shared key $SK = n \cdot E = e \cdot N$ where $n$ is the private viewing key and $N$ is the recipient's public viewing key.
-
-#### [9.1.9.3]
-
-The first byte of the cipher text is $data_{token}({O_{recipient}}) (mod\ 256)$
-
-#### [9.1.9.4]
-
-The next 16 bytes of the cipher text after [[9.1.9.3]](#9.1.9.3) is $salt({O_{recipient}})$
-
-#### [9.1.9.5]
-
-The next 32 bytes of the cipher text after [[9.1.9.4]](#9.1.9.4) is $asset_{eth}({O_{recipient}})$ or $asset_{erc20}({O_{recipient}})$ or $asset_{nft}({O_{recipient}})$
-
-</div>
-
-### 9.2 Mass Deposit
-
-#### [9.2.1]
-
-The first 32 bytes of mass deposit data is 
-
-#### [9.2.2]
-
-The next 32 bytes after [[9.2.1]](#9.2.1) is 
-### 9.3 Mass Deposit
-
-#### [9.2.1]
-
-#### [9.2.1]
-
-The first 32 bytes of mass deposit data is $h(h(h(h(h(0, d_1), d_2)...), d_{n-1}), d_n)$, which is the merged leaves, where ${MD} = [d_1, d_2, ..., d_n] = [h({U^{deposit}}_1), h({U^{deposit}}_2),..., h({U^{deposit}}_n)]$
-
-#### [9.2.2]
-
-The next 32 bytes after [[9.2.1]](#9.2.1) is the accumulated fee for the block proposer that is $fee({MD}) = \Sigma fee({Deposit})$.
-
-
-## 10. Optimistic rollup
-
-### 10.1 Block proposal
-
-#### [10.1.1]
-
-When a block $B^{(n)}$ is submitted to the layer-1 chain, the proposal transaction succeeds when only
-
-<div style="padding-left: 5rem">
-
-#### [10.1.1.1]
-
-Smart contract returns `true` for `proposable(proposer)`  when `proposer` is the address of $proposer^{(n)}$
-
-#### [10.1.1.2]
-
-The transaction data size is less than $C_{max-block-size}$.
-
-#### [10.1.1.3]
-
-$proposer^{(n)}$ equals the address of the transaction signer.
-
-#### [10.1.1.4]
-
-The checksum hash of the block data should be submitted once.
-
-#### [10.1.1.5]
-
-$stake(proposer)$ means the staked deposit of $proposer$ for the challenge system, then 
-$stake(proposer^{(n)}) \geq C_{minimum-stake}$
-
-</div>
-
-#### [10.1.2]
-
-And the proposal transaction records following data on-chain
-
-<div style="padding-left: 5rem">
-
-#### [10.1.2.1]
-
-Let $exit(proposer)$ is the allowed timestmap to withdraw staked asset, then $exit(proposer^{(n)}) = timestamp(B_{L1}^{(n)}) + C_{challenge-period}$
-
-#### [10.1.2.2]
-
-New block proposal freezes the staged mass deposit by [[10.1.2.5]](#10.1.2.5).
-
-#### [10.1.2.3]
-
-New block proposal emits an event `NewProposal(uint256, bytes32)` log to notify the data to layer 2 node operators.
-
-#### [10.1.2.4]
-
-New block proposal increments the number of proposals `proposedBlocks`.
-
-</div>
-
-#### [10.1.2.5]
-
-Anyone can freeze the staged mass deposit if it exists. Then the hash of the staged mass deposit is recorded on the smart contract and gets frozen not to allow any updates.
-
-### 10.2 Challenge: deposit validation
-
-#### [10.2.1]
-
-Let $MD^{(n)}_i$ is the $i$-th mass deposit of block $B^{(n)}$, then challenge succeeds when the hash of mass deposit $h(MD^{(n)}_i)$ is not recorded on the contract by [[10.1.2.5]].
-
-### 10.3 Challenge: header validation
-
-#### [10.3.1]
-
-A challenge succeeds when the deserialized block data $B^{(n)}$ does not satisfy [[8.2]](#8.2)
-
-#### [10.3.2]
-
-A challenge succeeds when the deserialized block data $B^{(n)}$ does not have correct fee by [[8.4]](#8.4)
-
-### 10.4 Challenge: migration validation
-
-#### [10.4.1]
-
-A challenge succeeds when it violates [[6.8]](#6.8)
-
-#### [10.4.2]
-
-A challenge succeeds when it violates [[6.9]](#6.9)
-
-### 10.5 Challenge: nullifier validation
-
-#### [10.5.1]
-
-A challenge succeeds when any nullifier from the block does not update the root of nullifier tree.
-
-### 10.6 Challenge: transaction validation
-
-#### [10.6.21
-
-A challenge succeeds when SNARK failes.
-
-#### [10.6.2]
-
-A challenge succeeds when the root reference is not finalized or is too out-dated.
-
-#### [10.6.3]
-
-A challenge succeeds when any nullifier from the block does not update the root of nullifier tree.
-
-### 10.7 Challenge: nullifier validation
-
-#### [10.7.1]
-
-A challenge succeeds when any nullifier from the block does not update the root of nullifier tree.
-
-### 10.7 Challenge: withdrawal validation
-
-#### [10.7.1]
-
-A challenge succeeds when it violates [[7.6.1]](#7.6.1) or [[7.6.2]](#7.6.2) or [[7.6.3]](#7.6.3) or [[7.6.4]](#7.6.4).
-
-### 10.8 Challenge: utxo validation
-
-#### [10.8.1]
-
-A challenge succeeds when it violates [[7.5.1]](#7.5.1) or [[7.5.2]](#7.5.2) or [[7.5.3]](#7.5.3) or [[7.5.4]](#7.5.4).
-
-## 11. Misc
-
-#### [11.1]
-
-$merge^{hash}([a_1, a_2, ..., a_n]) = hash(hash(hash(0, a_1), a_2)..., a_n)$
-
-#### [11.2]
-
-==merkleProof==
-
-#### [11.3]
-
-==merkleRoot==
-
-#### [11.4]
-
-Constant $c_{ref}$ is the number of blocks from the latest block that is allowed to be referenced in Zkopru transactions.
+$\mathsf{MerkleRoot_{h}([item_1, ...., item_n])}$ means the root of a [hash tree](https://www.researchgate.net/profile/Ralph-Merkle/publication/220713913_Protocols_for_Public_Key_Cryptosystems/links/00b495384ecda07784000000/Protocols-for-Public-Key-Cryptosystems.pdf) that uses $\mathsf{h}$ for its hash function.
