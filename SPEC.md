@@ -98,7 +98,7 @@ $\mathbf{B}$ is the base point for the EdDSA in Zkopru that has 8 for its cofact
 
 
 #### [1.7]
-$s$ is the 32 bytes private key of the account. For the seamless user experience, Zkopru uses Ethereum account's private key for its corresponding Zkopru account's private seed key.
+$s$ is the 32 bytes private key of the account. For the seamless user experience, Zkopru uses Ethereum account's private key or deterministically derived key from it for its corresponding Zkopru account's private seed key.
 
 #### [1.8]
 Let $r, \mathbb{F}_r$ be defined in [1.2].
@@ -662,7 +662,8 @@ struct Blockchain {
     mapping(bytes32 => bool) withdrawn;
     mapping(bytes32 => address) newWithdrawalOwner;
     // For migrations
-    mapping(bytes32 => bool) migrations;
+    mapping(bytes32 => bool) migrationRoots;
+    mapping(bytes32 => mapping(bytes32 => bool)) transferredMigrations;
     // For ERC20 and ERC721
     mapping(address => bool) registeredERC20s;
     mapping(address => bool) registeredERC721s;
@@ -851,14 +852,24 @@ As the user should wait the finalization, $\mathcal{W}$ owner can request an ins
 
 For the instant withdrawal with pay in advance feature,
 
-1. $\mathcal{W}$ owner select a prepayer and generate a message that
-    $$
-	\mathsf{msg_{prepay}} = keccak256(\mathsf{encodePacked}([\mathsf{addr_{prepayer}}, \mathsf{hash}(\mathcal{W}), f_{erc20}, f_{ether}]))
-	$$
+1. $\mathcal{W}$ owner select a prepayer and generate a message that follows the EIP712 spec with the following structure.
+    ```
+	struct PrepayRequest {
+	    address prepayer;
+	    bytes32 withdrawalHash;
+	    uint256 prepayFeeInEth;
+	    uint256 prepayFeeInToken;
+	    uint256 expiration;
+	}
+    ```
    Since the $\mathcal{W}$ might be a ERC20 only withdrawal note, the owner can choose how to pay the fee for instant withdrawal to the prepayer.
 2. Generate a ECDSA with the correct account which address is $\mathcal{N}.\mathsf{to}$ and send a request to the prepayer using a communication channels like HTTP.
-3. If the request look profitable, the prepayer verifies the validity calls the `payInAdvance()` function wwith the received ECDSA signature and correct amount of assets to pay in advance for the original owner.
-4. Smart contract verifies the relationship between $\mathsf{hash(\mathcal{W})}$, ECDSA, and the transaction signer. If it passes all verifications, it records the transferred ownership of the $\mathcal{W}$ and it transfers assets to the original owner.
+3. If the request look profitable, the prepayer verifies the validity calls the `payInAdvance()` function with the received ECDSA signature and correct amount of assets to pay in advance for the original owner.
+4. Smart contract verifies the relationship between $\mathsf{hash(\mathcal{W})}$, ECDSA, transaction signer and the expiration timestamp.
+    * Computed withdrawal hash of the given details equals to `withdrawalHash`.
+    * ECDSA satisfy EIP712 sign spec with its own domain using chain Id and contract address.
+    * Current block timestamp is smaller than the given expiration.
+5. If it passes all verifications, it records the transferred ownership of the $\mathcal{W}$ and it transfers assets to the original owner.
 
 ### 4.4 Migration
 
@@ -867,36 +878,28 @@ For the instant withdrawal with pay in advance feature,
 Let $\mathcal{M}$ be defined in [3.1.4]
 Let $M$ be the set of all migration type transaction outputs of a block.
 Let $A_\mathsf{dest}$ be the set of all destination addresses of the migration type transaction outputs of the block.
-Let $A_\mathsf{erc20}$ be the set of all ERC20 addresses that exist in the migration outputs.
-Let $A_\mathsf{erc721}$ be the set of all ERC721 addresses that exist in the migration outputs.
+Let $A_\mathsf{token}$ be the set of all token addresses that exist in the migration outputs.
 Let $\mathsf{merge()}$ be defined in [4.2.2.1]
 
-Then, for each $\mathsf{dest} \in A_\mathsf{dest}$, we can construct a set of migrations with
-$M_{\mathsf{dest}} =\{ \mathcal{M} | \mathcal{M}.\mathsf{to} = \mathsf{dest}\} = \{\mathcal{M_1, M_2, ..., M_k}\}$
+Then, for each $\mathsf{dest} \in A_\mathsf{dest}$, $\mathsf{token} \in A_\mathsf{token}$ we can construct a set of migrations with
+$M_{\mathsf{dest}} =\{ \mathcal{M} | \mathcal{M}.\mathsf{to} = \mathsf{dest} \land \mathcal{M}.\mathsf{token} = \mathsf{token} \} = \{\mathcal{M_1, M_2, ..., M_k}\}$
 
 Let $ftr$ be defined in [3.2.4.6.2]
 
-Then, for each $\mathsf{dest} \in A_\mathsf{dest}$, corresponding mass migration $\mathrm{MM}$ is defined as
+Then, for each $(\mathsf{dest}, \mathsf{token})$ pair where $\mathsf{dest} \in A_\mathsf{dest}$ and $\mathsf{token} \in A_\mathsf{token}$ has its corresponding mass migration $\mathrm{MM}$ defined as
 
-$\mathrm{MM} = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$
+$\mathrm{MM} = (\mathsf{dest}, \mathsf{asset_{migration}}, \mathrm{MD}_\mathsf{migration})$
 
 where
-* $\mathsf{v_{eth}} = \Sigma_{i=0}^{k} \mathcal{M}_i.\mathsf{v_{eth}}$
-* $\mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})$
-* $\mathsf{migration_{erc20}} = \{ (\mathsf{addr}, \mathsf{amount}) | \mathsf{addr} \in A_\mathsf{erc20} \text{, } \mathsf{amount} = \Sigma_{i=1}^k \mathcal{M_i}.\mathsf{v_{erc20}}\cdot ftr(\mathcal{M_i.\mathsf{addr_{token}}}, \mathsf{addr})\}$
-* $\mathsf{migration_{erc721}} = \{ (\mathsf{addr}, \mathsf{nfts}) | \mathsf{addr} \in A_\mathsf{erc721} \text{, } \mathsf{nfts} = \{\mathcal{M}.\mathsf{v_{nft}} | \mathcal{M}\in \mathrm{M}_\mathsf{dest}\text{, }\mathcal{M}.\mathsf{v_{nft}} \neq 0 \}\}$
+* $\mathsf{asset_{migration}} = (\mathsf{eth, token, amount})$
+* $\mathrm{MD}_\mathsf{migration} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})$
 
-#### [4.4.2] Destination
+#### [4.4.2] Destination & Token address pair
 
 Let a block contain mass migrations $[\mathrm{MM}_1, ..., \mathrm{MM}_n]$
+and $(\mathsf{dest}, \mathsf{token})_i = (\mathrm{MM}_i.\mathsf{dest}, \mathrm{MM}_i.\mathsf{token})$
 
-Then $\mathrm{MM}_i.\mathsf{dest} \neq \mathrm{MM}_j.\mathsf{dest}$ when $i \neq j$ and $i,j \in A_\mathsf{dest}$
-
-#### [4.4.3] Accept migrations & `migrateTo`
-
-Zkopru can have and manage an allow list of migrant contracts. Once the source address of a mass migration is in the allow list, anyone can execute the `migrateTo()` function to the source contract to trasnfer assets and create a mass deposit for the assets.
-
-Then, $\mathsf{dest}$ network adds the given $\mathrm{MD}$ to `Zkopru(dest).chain.committedDeposits`.
+Then $(\mathsf{dest}, \mathsf{token})_i \neq (\mathsf{dest}, \mathsf{token})_j$ when $i \neq j$.
 
 ### 4.5 Proposal & Finalization
 
@@ -925,7 +928,7 @@ To call the function `propose()`, it requires
 * $\mathsf{Block}^{(n)}.\mathsf{proposer}$ equals to the `msg.sender`.
 * There is no duplicated proposal that has same block proposal checksum which is defined in [6.7.2].
 
-Once the function `propose()` is called, 
+Once the function `propose()` is called,
 
 * It records the block hash by chaining with its parent hash value.
 * It saves the proposal checksum for its future challenge.
@@ -950,23 +953,31 @@ To finalize a block, it requires
 
 * $\mathsf{depositRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MDs}^{(n)}$.
 * $\mathsf{migrationRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MMs}^{(n)}$.
-* $\mathsf{migrationRoot}^{(n)}$ should equal to the hash of the submitted $\mathtt{MMs}^{(n)}$.
 * $\mathsf{hash}(\mathsf{Header}^{(n)})$ should equal to the stored hash in `proposal`.
 * `proposal` should not be slashed.
 * `proposal` should not be finalized.
 * `Zkopru.chain.latest` should equal to the $\mathsf{parent}$ of $\mathsf{Header}^{(n)}$.
 * `proposal.challengeDue` should be behind `block.number`.
 * Every $\mathtt{MD}$ should be committed in the `Zkopru.chain.committedDeposits`.
-* Every $\mathtt{MM}$ should not exist in the `Zkopru.chain.migrations`.
+* $\mathsf{migrationRoot}^{(n)}$ should not exist in the `Zkopru.chain.migrationRoots`.
 
 Once the function `finalize()` is called, 
 * It removes the every $\mathtt{MD}$ from `Zkopru.chain.committedDeposits`.
-* It marks all $\mathtt{MM}$ as true in `Zkopru.chain.migrations`. It allows `migrateTo()` function call in [4.4.3].
+* It marks $\mathsf{migrationRoot}^{(n)}$ as true in `Zkopru.chain.migrationRoots`. It allows `migrateFrom()` function call in [4.5.6].
 * It gives the $\mathsf{fee}^{(n)}$ to the proposer.
 * It marks the block header hash as finalized in `Zkopru.chain.finalized`
 * It marks the utxo root as finalized in `Zkopru.chain.finalizedUTXORoots`
 * It updates the latest block hash `latest`.
 * It deletes `proposal`.
+
+#### [4.5.6] Finalization & `migrateFrom`
+
+Let $\mathrm{MM}$ be defined in [4.4.1]
+Let $\mathsf{migrationRoot}^{(n)}$ be defined in [4.5.5] and $\mathrm{MM}^{(n)}_i$ is one of migrations in that Merkle tree.
+
+After $\mathsf{migrationRoot}^{(n)}$ is finalized on the contract, the destination network of $\mathrm{MM}^{(n)}_i$ can call `migrateFrom` function to migrate $\mathsf{asset}_\mathsf{migration}$ with its MerkleProof.
+
+Then, it records $(\mathsf{migrationRoot}^{(n)}, \mathsf{hash}(\mathrm{MM}^{(n)}_i))$ as transferred in `Zkopru(source).chain.transferredMigratios`. Simultaneously, it transfers the given ETH and tokens to the $\mathsf{dest}$ network adding $\mathrm{MD}_\mathsf{migration}$ to `Zkopru(dest).chain.committedDeposits`.
 
 ### 4.6 Token Registration
 
@@ -1035,34 +1046,43 @@ Then, $\mathsf{parent}^{(n)}$ should not be a slashed block. So if `Zkopru.chain
 
 #### [4.7.3.1] Migration Validation - M1: Duplicated MassMigration
 
-
 Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
 
 If it does not satisfy the condition [4.4.2] that every migration should have different destination, the validation contract returns `slashable = true` with code M1.
 
-#### [4.7.3.2] Migration Validation - M2: Migration ETH Amount
+#### [4.7.3.2] Migration Validation - M2: MassMigration is carrying invalid amount of ETH.
 
 Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
 
-If it does not satisfy the total ETH condition in [4.4.1]
+If it does not satisfy the following condition,
 $$
-\mathsf{v_{eth}} = \Sigma_{i=0}^{k} \mathcal{M}_i.\mathsf{v_{eth}}
+\mathrm{MM}.\mathsf{asset_{migration}}.\mathsf{eth} = \Sigma \mathcal{M}.\mathsf{v_{eth}}
 $$
 
-the validation contract returns `slashable = true` with code M2.
+If the sum of total ETH does not equal to the $\mathsf{eth}$ defined in the migrating asset, and the validation contract returns `slashable = true` with code M2.
 
-#### [4.7.3.3] Migration Validation - M3: Merged Leaves
+#### [4.7.3.3] Migration Validation - M3: MassMigration is carrying invalid amount of Token.
 
 Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
 
-If it does not satisfy the $\mathsf{merge}$ condition in [4.4.1]
+If it does not satisfy the following condition,
 $$
-\mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})
+\mathrm{MM}.\mathsf{asset_{migration}}.\mathsf{amount} = \Sigma \mathcal{M}.\mathsf{v_{erc20}}
+$$
+If the sum of total token amount does not equal to the $\mathsf{amount}$ defined in the migrating asset, and the validation contract returns `slashable = true` with code M3.
+
+#### [4.7.3.4] Migration Validation - M4: Merged Leaves
+
+Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
+
+If the mass deposit fot the destination does not equal to the on-chain computed mass deposit
+$$
+\mathrm{MD}_\mathsf{migration} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})
 $$
 
-the validation contract returns `slashable = true` with code M3.
+the validation contract returns `slashable = true` with code M4.
 
-#### [4.7.3.4] Migration Validation - M4: Migration Fee
+#### [4.7.3.5] Migration Validation - M5: Migration Fee
 
 Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
 
@@ -1071,50 +1091,17 @@ $$
 \mathrm{MD} = (\mathsf{merge(\mathcal{[M_1, ..., M_k]})}, \Sigma_{i=0}^{k}\mathcal{M}.\mathsf{fee_{migration}})
 $$
 
-the validation contract returns `slashable = true` with code M4.
-
-#### [4.7.3.5] Migration Validation - M5: Duplicated ERC20 Migration
-
-Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
-Let $\mathsf{migration_{erc20}} = [\mathsf{m_{erc20}}_1, ..., \mathsf{m_{erc20}}_n]$.
-
-If $\mathsf{m_{erc20}}_i.\mathsf{addr} = \mathsf{m_{erc20}}_j.\mathsf{addr}$ and $i \neq j$, then
 the validation contract returns `slashable = true` with code M5.
 
-#### [4.7.3.6] Migration Validation - M6: ERC20 Migration Amount
+#### [4.7.3.6] Only registered ERC20 tokens are supported for mass migration
 
 Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
-Let $\mathsf{migration_{erc20}} = [\mathsf{m_{erc20}}_1, ..., \mathsf{m_{erc20}}_n]$.
 
-Then, for $1 \leq i\leq n$, if it does not satisfy the following condition:
+If $\mathcal{M}.\mathsf{token}$a does not exists in the contract storage `Zkopru.chain.registeredERC20s` it returns `slashable = true` with code M6.
 
-$\mathsf{m_{erc20}}_i.\mathsf{amount} = \Sigma_{j=1}^k \mathcal{M_i}.\mathsf{v_{erc20}}\cdot ftr(\mathcal{M_j.\mathsf{addr_{token}}}, \mathsf{m_{erc20}}_i.\mathsf{addr})\}$
-where $\mathcal{M_j} \in \mathcal{M}_\mathsf{dest}$ as defined in [4.4.1].
+#### [4.7.3.7] Migration Validation - M7: Missing Migration
 
-the validation contract returns `slashable = true` with code M6.
-
-#### [4.7.3.7] Migration Validation - M7: Duplicated ERC721 Migration
-
-Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
-Let $\mathsf{migration_{erc721}} = [\mathsf{m_{erc721}}_1, ..., \mathsf{m_{erc721}}_n]$.
-
-If $\mathsf{m_{erc721}}_i.\mathsf{addr} = \mathsf{m_{erc721}}_j.\mathsf{addr}$ and $i \neq j$, then
-the validation contract returns `slashable = true` with code M7.
-
-#### [4.7.3.8] Migration Validation - M8: ERC721 Duplicated NFTs
-
-Let $\mathrm{MM}$ is one of the submitted mass migration in $\mathsf{Block}^{(n)}$.
-Let $\mathsf{migration_{erc721}} = [\mathsf{m_{erc721}}_1, ..., \mathsf{m_{erc721}}_n]$.
-
-Then, for every $1 \leq i\leq n$, if there exists duplicated NFT ids, the validation contract returns `slashable = true` with code M8.
-
-#### [4.7.3.9] Migration Validation - M9: Missing NFT
-
-For every $\mathcal{Tx}$, if the migration output NFT does not exists in the mass migration object, the validation contract returns `slashable = true` with code M9.
-
-#### [4.7.3.10] Migration Validation - M10: Missing Migration
-
-For every $\mathcal{Tx}$, if the migration destination does not exists in the mass migration list, the validation contract returns `slashable = true` with code M10.
+For every $\mathcal{Tx}$, a mass migration should exists in the $\mathrm{MM}[]$ list that correspondes its destination and carrying token address. If the block body misses any destination or token, the validation contract returns `slashable = true` with code M7.
 
 #### [4.7.4] Nullifier Validation - N1: Nullifier root is not correct
 
@@ -1813,55 +1800,20 @@ Let $\mathrm{MD}_i$ be the $i$-th Mass Deposit of $\mathsf{Block}^{(n)}$.
 
 ### 6.5 Mass Migration Serialization
 
-#### [6.5.1] Dynamic Sized Buffer
-
-Prepare a dynamic sized buffer, $\mathtt{buff}_{mm_{i}}$. We will push bytes data to the buffer by the following sequences. The final state of $\mathtt{buff}_{mm_{i}}$ after appending all data becomes $\mathtt{MM}_i$.
-
-#### [6.5.2] Destination and total ETH 
+#### [6.5.1] Mass Migration
 
 
-Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
+Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM} = (\mathsf{dest}, \mathsf{asset_{migration}}, \mathrm{MD}_\mathsf{migration})$ as defined in [4.4.1].
 
-1. Serialize $\mathsf{dest}$ into 20 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
-2. Serialize $\mathsf{v_{eth}}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
-
-#### [6.5.3] Mass Deposit Object for Destination
-
-Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
-
-1. Serialize $\mathrm{MD}$  defined in [6.5.1] into a 64 bytes buffer as defined in [6.4.1].
-2. Push the serialized $\mathrm{MD}$ into $\mathtt{buff}_{mm_i}$.
-
-#### [6.5.4] ERC20 assets
-
-Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
-Let $\mathsf{migration_{erc20}} = \mathsf{[(addr_1, amount_1), ..., (addr_{\mathit{n}_{erc20}}, amount_{\mathit{n}_{erc20}})]}$
-
-1. Prepare a dynamic sized buffer $\mathtt{buff}_{erc20}$.
-2. Store the length of erc20 assets $n_\mathsf{erc20}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc20}$.
-3. Starting from $j$ = 1 and repeat the below steps until $j$ is less than or equal to $n_\mathsf{erc20}$:
-    1. Store $\mathsf{addr}_j$ into 20 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
-    1. Store $\mathsf{amount}_j$ into 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
-4. Push $\mathtt{buff}_{erc20}$ to $\mathtt{buff}_{mm_i}$
-
-#### [6.5.5] ERC721 assets
-
-Let $\mathrm{MM}_i$ be the $i$-th Mass Migration of $\mathsf{Block}^{(n)}$ and $\mathrm{MM}_i = (\mathsf{dest}, \mathsf{v_{eth}}, \mathrm{MD}, \mathsf{migration_{erc20}}, \mathsf{migration_{nft}})$ as defined in [4.4.1].
-Let $\mathsf{migration_{erc721}} = \mathsf{[(addr_1, nfts_1), ..., (addr_{\mathit{n}_{erc721}}, nfts_{\mathit{n}_{erc721}})]}$
-
-1. Prepare a dynamic sized buffer $\mathtt{buff}_{erc721}$.
-2. Store the length of erc721 assets $n_\mathsf{erc721}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc721}$.
-3. Starting from $j$ = 1 and repeat the below steps until $j$ is less than or equal to $n_\mathsf{erc721}$:
-    1. Store $\mathsf{addr}_j$ into 20 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc20}$.
-    2. Let $\mathsf{nfts}_j = \mathsf{[id_1, id_2, ..., id_\mathit{n_{nft_j}}]}$.
-    3. Store $n_{nft_j}$ into a single byte with big-endian and push it to $\mathtt{buff}_{erc721}$.
-    4. Starting from $k$ = 1 and repeat the below steps until $k$ is less than or equal to $n_{nft_j}$:
-        1. Store $\mathsf{id}_k$ into 32 bytes buffer with big-endian and push it to $\mathtt{buff}_{erc721}$.
-4. Push $\mathtt{buff}_{erc721}$ to $\mathtt{buff}_{mm_i}$
-
-#### [6.5.6] $\mathtt{MM}_i$
-
-Freeze the dynamic sized buffer $\mathtt{buff}_{mm_i}$ and let it be $\mathtt{MM}_i$
+Then, let $(\mathsf{eth, token, amount}) = \mathsf{asset_{migration}}$ and $(\mathsf{merged}, f_\mathrm{MD}) = \mathrm{MD}_\mathsf{migration}$
+1. Prepare 168 bytes buffer $\mathtt{buff}_{mm_{i}}$.
+2. Serialize $\mathsf{dest}$ into 20 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+3. Serialize $\mathsf{eth}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+4. Serialize $\mathsf{token}$ into 20 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+5. Serialize $\mathsf{amount}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+6. Serialize $\mathsf{migration}.\mathsf{merged}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+7. Serialize $f_\mathsf{MD}$ into 32 bytes buffer with big-endian and push it into $\mathtt{buff}_{mm_i}$.
+8. Finally set $\mathtt{buff}_{mm_i}$ as $\mathtt{MM}_i$
 
 ### 6.6 Body Serialization
 
